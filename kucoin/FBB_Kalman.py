@@ -39,7 +39,7 @@ import simdkalman
 
 """
 ####################################################################################
-FBB_Kalman - use a Kalmqn Filter to estimate future price movements,
+FBB_Kalman - use a Kalman Filter to estimate future price movements,
           and Fisher/Williams/Bollinger buy/sell signals
           The DWT is good at detecting swings, while the FBB checks are to try and keep
           trades within oversold/overbought regions

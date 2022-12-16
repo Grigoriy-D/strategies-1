@@ -57,7 +57,7 @@ class FBB_DWT(IStrategy):
     }
 
     # Stoploss:
-    stoploss = -0.10
+    stoploss = -0.05
 
     # Trailing stop:
     trailing_stop = False
@@ -71,9 +71,9 @@ class FBB_DWT(IStrategy):
     use_custom_stoploss = True
 
     # Recommended
-    use_sell_signal = True
-    sell_profit_only = False
-    ignore_roi_if_buy_signal = True
+    use_exit_signal = True
+    exit_profit_only = False
+    ignore_roi_if_entry_signal = True
 
     # Required
     startup_candle_count: int = 128
@@ -309,14 +309,14 @@ class FBB_DWT(IStrategy):
         )
 
         return WR * -100
+
     ###################################
 
     """
     Buy Signal
     """
 
-
-    def populate_buy_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
+    def populate_entry_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
         conditions = []
         dataframe.loc[:, 'buy_tag'] = ''
 
@@ -370,8 +370,7 @@ class FBB_DWT(IStrategy):
     Sell Signal
     """
 
-
-    def populate_sell_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
+    def populate_exit_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
         conditions = []
         dataframe.loc[:, 'exit_tag'] = ''
 
@@ -453,7 +452,7 @@ class FBB_DWT(IStrategy):
     Custom Sell
     """
 
-    def custom_sell(self, pair: str, trade: 'Trade', current_time: 'datetime', current_rate: float,
+    def custom_exit(self, pair: str, trade: 'Trade', current_time: 'datetime', current_rate: float,
                     current_profit: float, **kwargs):
 
         dataframe, _ = self.dp.get_analyzed_dataframe(pair=pair, timeframe=self.timeframe)

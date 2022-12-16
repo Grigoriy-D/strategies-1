@@ -34,24 +34,25 @@ warnings.simplefilter(action='ignore', category=pd.errors.PerformanceWarning)
 
 import custom_indicators as cta
 
-from  pykalman import KalmanFilter
+from  simdkalman import KalmanFilter
+import scipy
 
 
 """
 ####################################################################################
-Kalman - use a Kalmqn Filter to estimate future price movements,
-          but *without* Fisher/Williams/Bollinger buy/sell signals
+KalmanSIMD_short - use a DKalman Filter (from simdkalman) to estimate future price movements
+            This version will enter both long and short positions
 
 ####################################################################################
 """
 
 
-class Kalman(IStrategy):
+class KalmanSIMD_short(IStrategy):
     # Do *not* hyperopt for the roi and stoploss spaces
 
     # ROI table:
     minimal_roi = {
-        "0": 10
+        "0": 0.1
     }
 
     # Stoploss:
@@ -64,7 +65,7 @@ class Kalman(IStrategy):
     trailing_only_offset_is_reached = False
 
     timeframe = '5m'
-    inf_timeframe = '1h'
+    inf_timeframe = '1h'  # 15m takes too long
 
     use_custom_stoploss = True
 
@@ -74,8 +75,13 @@ class Kalman(IStrategy):
     ignore_roi_if_entry_signal = True
 
     # Required
-    startup_candle_count: int = 32
+    startup_candle_count: int = 128 # must be power of 2
+
     process_only_new_candles = True
+
+    trading_mode = "futures"
+    margin_mode = "isolated"
+    can_short = True
 
     custom_trade_info = {}
 
@@ -83,40 +89,31 @@ class Kalman(IStrategy):
 
     # Strategy Specific Variable Storage
 
+    ## Hyperopt Variables
+
     kf_window = startup_candle_count
     filter_list = {}
     filter_init_list = {}
 
     kalman_filter = KalmanFilter(
-                transition_matrices=1.0,
-                observation_matrices=1.0,
-                initial_state_mean=0.0,
-                initial_state_covariance=1.0,
-                observation_covariance=0.1,
-                transition_covariance=0.1
+                state_transition=1.0,
+                process_noise=2.0,
+                observation_model=1.0,
+                observation_noise=0.5
             )
     current_pair = ""
 
-
-    ## Hyperopt Variables
-    
     # Kalman  hyperparams
-    entry_kf_diff = DecimalParameter(0.0, 5.0, decimals=1, default=1.0, space='buy', load=True, optimize=True)
+    entry_long_kf_diff = DecimalParameter(0.0, 5.0, decimals=1, default=2.0, space='buy', load=True, optimize=True)
+    entry_short_kf_diff = DecimalParameter(-5.0, 0.0, decimals=1, default=-2.0, space='buy', load=True, optimize=True)
+    exit_long_kf_diff = DecimalParameter(-5.0, 0.0, decimals=1, default=-2.0, space='sell', load=True, optimize=True)
+    exit_short_kf_diff = DecimalParameter(0.0, 5.0, decimals=1, default=-2.0, space='sell', load=True, optimize=True)
 
-    exit_kf_diff = DecimalParameter(-5.0, 0.0, decimals=1, default=-0.1, space='sell', load=True, optimize=True)
-
-
-    # # FBB_ hyperparams
-    # buy_bb_gain = DecimalParameter(0.01, 0.50, decimals=2, default=0.09, space='buy', load=True, optimize=True)
-    # buy_fisher_wr = DecimalParameter(-0.99, -0.75, decimals=2, default=-0.75, space='buy', load=True, optimize=True)
-    # # buy_force_fisher_wr = DecimalParameter(-0.99, -0.85, decimals=2, default=-0.99, space='buy', load=True, optimize=True)
-    #
-    # exit_bb_gain = DecimalParameter(0.7, 1.5, decimals=2, default=0.8, space='sell', load=True, optimize=True)
-    # exit_fisher_wr = DecimalParameter(0.75, 0.99, decimals=2, default=0.9, space='sell', load=True, optimize=True)
-    # # exit_force_fisher_wr = DecimalParameter(0.85, 0.99, decimals=2, default=0.99, space='sell', load=True, optimize=True)
+    entry_trend_type = CategoricalParameter(['rmi', 'ssl', 'candle', 'macd', 'none'], default='candle', space='buy',
+                                            load=True, optimize=True)
 
 
-    # Custom Sell Profit (formerly Dynamic ROI)
+    # Custom exit Profit (formerly Dynamic ROI)
     cexit_roi_type = CategoricalParameter(['static', 'decay', 'step'], default='step', space='sell', load=True,
                                           optimize=True)
     cexit_roi_time = IntParameter(720, 1440, default=720, space='sell', load=True, optimize=True)
@@ -165,20 +162,16 @@ class Kalman(IStrategy):
         informative = self.dp.get_pair_dataframe(pair=curr_pair, timeframe=self.inf_timeframe)
 
         # Kalman Filter
-
-        # get filter for current pair
-
+        
         self.current_pair = curr_pair
 
         # create if not already done
         if not curr_pair in self.filter_list:
             self.filter_list[curr_pair] = kalman_filter = KalmanFilter(
-                transition_matrices=1.0,
-                observation_matrices=1.0,
-                initial_state_mean=0.0,
-                initial_state_covariance=1.0,
-                observation_covariance=0.1,
-                transition_covariance=0.1
+                state_transition=1.0,
+                process_noise=2.0,
+                observation_model=1.0,
+                observation_noise=0.5
             )
             self.filter_init_list[curr_pair] = False
 
@@ -186,15 +179,27 @@ class Kalman(IStrategy):
         # set current filter (can't pass parameter to apply())
         self.kalman_filter = self.filter_list[curr_pair]
 
-        informative['kf_predict'] = informative['close'].rolling(window=self.kf_window).apply(self.model)
+        informative['kf_model'] = informative['close'].rolling(window=self.kf_window).apply(self.model)
+        # informative['kf_predict'] = informative['kf_model'].rolling(window=self.kf_window).apply(self.predict)
+        # informative['stddev'] = informative['close'].rolling(window=self.kf_window).std()
 
         # merge into normal timeframe
         dataframe = merge_informative_pair(dataframe, informative, self.timeframe, self.inf_timeframe, ffill=True)
 
         # calculate predictive indicators in shorter timeframe (not informative)
 
-        dataframe['kf_predict'] = dataframe[f"kf_predict_{self.inf_timeframe}"]
-        dataframe['kf_predict_diff'] = 100.0 * (dataframe['kf_predict'] - dataframe['close']) / dataframe['close']
+        dataframe['kf_model'] = dataframe[f"kf_model_{self.inf_timeframe}"]
+        # dataframe['stddev'] = dataframe[f"stddev_{self.inf_timeframe}"]
+        dataframe['kf_model_diff'] = 100.0 * (dataframe['kf_model'] - dataframe['close']) / dataframe['close']
+        # dataframe['kf_model_diff2'] = (dataframe['kf_model'] - dataframe['close']) / dataframe['stddev']
+        # dataframe['kf_predict'] = dataframe[f"kf_predict_{self.inf_timeframe}"]
+        # dataframe['kf_predict_diff'] = 100.0 * (dataframe['kf_predict'] - dataframe['kf_model']) / dataframe['kf_model']
+
+        # MACD
+        macd = ta.MACD(dataframe)
+        dataframe['macd'] = macd['macd']
+        dataframe['macdsignal'] = macd['macdsignal']
+        dataframe['macdhist'] = macd['macdhist']
 
         # Custom Stoploss
 
@@ -228,8 +233,13 @@ class Kalman(IStrategy):
 
     ###################################
 
-    def model(self, a: np.ndarray) -> np.float:
 
+    def madev(self, d, axis=None):
+        """ Mean absolute deviation of a signal """
+        return np.mean(np.absolute(d - np.mean(d, axis)), axis)
+
+
+    def model(self, a: np.ndarray) -> np.float:
         # scale the data
         standardized = a.copy()
         w_mean = np.mean(standardized)
@@ -250,18 +260,18 @@ class Kalman(IStrategy):
 
         length = len(model)
         return model[length-1]
-    
+
     def scaledModel(self, a: np.ndarray) -> np.float:
+        #must return scalar, so just calculate prediction and take last value
+        # model = self.KalmanModel(np.array(a))
 
-        # scale the data
-        standardized = a.copy()
-        w_mean = np.mean(standardized)
-        w_std = np.std(standardized)
-        scaled = (standardized - w_mean) / w_std
-        scaled.fillna(0, inplace=True)
+        # de-trend the data
+        w_mean = a.mean()
+        w_std = a.std()
+        x_notrend = (a - w_mean) / w_std
 
-        # get the Fourier model
-        model = self.kalmanModel(scaled, self.kalman_filter)
+        # get Kalman model of data
+        model = self.KalmanModel(x_notrend)
 
         length = len(model)
         return model[length-1]
@@ -273,7 +283,7 @@ class Kalman(IStrategy):
         w_mean = np.mean(standardized)
         w_std = np.std(standardized)
         scaled = (standardized - w_mean) / w_std
-        scaled.fillna(0, inplace=True)
+        # scaled.fillna(0, inplace=True)
 
         length = len(scaled)
         return scaled.ravel()[length-1]
@@ -292,7 +302,8 @@ class Kalman(IStrategy):
         # print("model(", len(mean), "): ", mean)
 
         # predict next close
-        pr_mean, pr_cov = kfilter.smooth(x)
+        smoothed = kfilter.smooth(x)
+        pr_mean = smoothed.observations.mean
         restored_sig = pr_mean.squeeze()
         # print ("Predict(", len(restored_sig), "): ", restored_sig)
 
@@ -301,59 +312,99 @@ class Kalman(IStrategy):
         model = restored_sig[ldiff:]
 
         return model
+    
+    def predict(self, a: np.ndarray) -> np.float:
 
-    # ###################################
-    # 
-    # # Williams %R
-    # def williams_r(self, dataframe: DataFrame, period: int = 14) -> Series:
-    #     """Williams %R, or just %R, is a technical analysis oscillator showing the current closing price in relation to the high and low
-    #         of the past N days (for a given N). It was developed by a publisher and promoter of trading materials, Larry Williams.
-    #         Its purpose is to tell whether a stock or commodity market is trading near the high or the low, or somewhere in between,
-    #         of its recent trading range.
-    #         The oscillator is on a negative scale, from −100 (lowest) up to 0 (highest).
-    #     """
-    # 
-    #     highest_high = dataframe["high"].rolling(center=False, window=period).max()
-    #     lowest_low = dataframe["low"].rolling(center=False, window=period).min()
-    # 
-    #     WR = Series(
-    #         (highest_high - dataframe["close"]) / (highest_high - lowest_low),
-    #         name=f"{period} Williams %R",
-    #     )
-    # 
-    #     return WR * -100
+        # predicts the next value using polynomial extrapolation
+
+        # a.fillna(0)
+
+        # fit the supplied data
+        # Note: extrapolation is notoriously fickle. Be careful
+        length = len(a)
+        x = np.arange(length)
+        f = scipy.interpolate.UnivariateSpline(x, a, k=5)
+
+        # predict 1 step ahead
+        predict = f(length)
+
+        return predict
+
     ###################################
 
     """
-    Buy Signal
+    entry Signal
     """
 
 
     def populate_entry_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
-        conditions = []
+        short_conditions = []
+        long_conditions = []
         dataframe.loc[:, 'enter_tag'] = ''
 
-        # conditions.append(dataframe['volume'] > 0)
+        # checks for long/short conditions
+        if (self.entry_trend_type.value != 'none'):
 
+            # short if uptrend, long if downtrend (contrarian)
+            if (self.entry_trend_type.value != 'rmi'):
+                long_cond = (dataframe['rmi-up-trend'] != 1)
+                short_cond = (dataframe['rmi-up-trend'] == 1)
+            elif (self.entry_trend_type.value != 'ssl'):
+                long_cond = (dataframe['ssl-dir'] == 'down')
+                short_cond = (dataframe['ssl-dir'] == 'up')
+            elif (self.entry_trend_type.value != 'candle'):
+                long_cond = (dataframe['candle-up-trend'] != 1)
+                short_cond = (dataframe['candle-up-trend'] == 1)
+            elif (self.entry_trend_type.value != 'macd'):
+                long_cond = (dataframe['macdhist'] < 0.0)
+                short_cond = (dataframe['macdhist'] > 0.0)
+
+            long_conditions.append(long_cond)
+            short_conditions.append(short_cond)
+
+
+        # Long Processing
 
         # Kalman triggers
-        kf_cond = (
-                qtpylib.crossed_above(dataframe['kf_predict_diff'], self.entry_kf_diff.value)
+        long_kf_cond = (
+                qtpylib.crossed_above(dataframe['kf_model_diff'], self.entry_long_kf_diff.value)
         )
 
-        conditions.append(kf_cond)
-
-        # Model will spike on big gains, so try to constrain
-        spike_cond = (
-                dataframe['kf_predict_diff'] < 2.0 * self.entry_kf_diff.value
+        # Kalmans will spike on big gains, so try to constrain
+        long_spike_cond = (
+                dataframe['kf_model_diff'] < 2.0 * self.entry_long_kf_diff.value
         )
-        conditions.append(spike_cond)
 
-        # set buy tags
-        dataframe.loc[kf_cond, 'enter_tag'] += 'kf_buy '
+        long_conditions.append(long_kf_cond)
+        long_conditions.append(long_spike_cond)
 
-        if conditions:
-            dataframe.loc[reduce(lambda x, y: x & y, conditions), 'enter_long'] = 1
+        # set entry tags
+        dataframe.loc[long_kf_cond, 'enter_tag'] += 'long_kf_entry '
+
+        if long_conditions:
+            dataframe.loc[reduce(lambda x, y: x & y, long_conditions), 'enter_long'] = 1
+
+        # Short Processing
+
+        # Kalman triggers
+        short_kf_cond = (
+                qtpylib.crossed_below(dataframe['kf_model_diff'], self.entry_short_kf_diff.value)
+        )
+
+
+        # Kalmans will spike on big gains, so try to constrain
+        short_spike_cond = (
+                dataframe['kf_model_diff'] > 2.0 * self.entry_short_kf_diff.value
+        )
+
+        short_conditions.append(short_kf_cond)
+        short_conditions.append(short_spike_cond)
+
+        # set entry tags
+        dataframe.loc[short_kf_cond, 'enter_tag'] += 'short_kf_entry '
+
+        if short_conditions:
+            dataframe.loc[reduce(lambda x, y: x & y, short_conditions), 'enter_short'] = 1
 
         return dataframe
 
@@ -361,40 +412,66 @@ class Kalman(IStrategy):
     ###################################
 
     """
-    Sell Signal
+    exit Signal
     """
 
 
     def populate_exit_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
-        conditions = []
+        short_conditions = []
+        long_conditions = []
         dataframe.loc[:, 'exit_tag'] = ''
 
+        # Long Processing
+
         # Kalman triggers
-        kf_cond = (
-                qtpylib.crossed_below(dataframe['kf_predict_diff'], self.exit_kf_diff.value)
+        long_kf_cond = (
+                qtpylib.crossed_below(dataframe['kf_model_diff'], self.exit_long_kf_diff.value)
         )
 
-        conditions.append(kf_cond)
-
-        # DWTs will spike on big gains, so try to constrain
-        spike_cond = (
-                dataframe['kf_predict_diff'] > 2.0 * self.exit_kf_diff.value
+        # Kalmans will spike on big gains, so try to constrain
+        long_spike_cond = (
+                dataframe['kf_model_diff'] > 2.0 * self.exit_long_kf_diff.value
         )
-        conditions.append(spike_cond)
 
-        # set sell tags
-        dataframe.loc[kf_cond, 'exit_tag'] += 'kf_sell '
+        long_conditions.append(long_kf_cond)
+        long_conditions.append(long_spike_cond)
+
+        # set exit tags
+        dataframe.loc[long_kf_cond, 'exit_tag'] += 'long_kf_exit '
+
+        if long_conditions:
+            dataframe.loc[reduce(lambda x, y: x & y, long_conditions), 'exit_long'] = 1
 
 
+        # Short Processing
 
-        if conditions:
-            dataframe.loc[reduce(lambda x, y: x & y, conditions), 'exit_long'] = 1
+        # Kalman triggers
+        short_kf_cond = (
+            qtpylib.crossed_above(dataframe['kf_model_diff'], self.exit_short_kf_diff.value)
+        )
+
+
+        # Kalmans will spike on big gains, so try to constrain
+        short_spike_cond = (
+                dataframe['kf_model_diff'] < 2.0 * self.exit_short_kf_diff.value
+        )
+
+        # conditions.append(long_cond)
+        short_conditions.append(short_kf_cond)
+        short_conditions.append(short_spike_cond)
+
+        # set exit tags
+        dataframe.loc[short_kf_cond, 'exit_tag'] += 'short_kf_exit '
+
+        if short_conditions:
+            dataframe.loc[reduce(lambda x, y: x & y, short_conditions), 'exit_short'] = 1
 
         return dataframe
 
 
-
     ###################################
+
+    # the custom stoploss/exit logic is adapted from Solipsis by werkkrew (https://github.com/werkkrew/freqtrade-strategies)
 
     """
     Custom Stoploss
@@ -412,7 +489,7 @@ class Kalman(IStrategy):
         if current_profit <  self.cstop_max_stoploss.value:
             return 0.01
 
-        # Determine how we sell when we are in a loss
+        # Determine how we exit when we are in a loss
         if current_profit < self.cstop_loss_threshold.value:
             if self.cstop_bail_how.value == 'roc' or self.cstop_bail_how.value == 'any':
                 # Dynamic bailout based on rate of change
@@ -430,7 +507,7 @@ class Kalman(IStrategy):
     ###################################
 
     """
-    Custom Sell
+    Custom exit
     """
 
     def custom_exit(self, pair: str, trade: 'Trade', current_time: 'datetime', current_rate: float,
@@ -467,11 +544,11 @@ class Kalman(IStrategy):
             if last_candle['candle-up-trend'] == 1:
                 in_trend = True
 
-        # Don't sell if we are in a trend unless the pullback threshold is met
+        # Don't exit if we are in a trend unless the pullback threshold is met
         if in_trend == True and current_profit > 0:
-            # Record that we were in a trend for this trade/pair for a more useful sell message later
+            # Record that we were in a trend for this trade/pair for a more useful exit message later
             self.custom_trade_info[trade.pair]['had-trend'] = True
-            # If pullback is enabled and profit has pulled back allow a sell, maybe
+            # If pullback is enabled and profit has pulled back allow a exit, maybe
             if self.cexit_pullback.value == True and (current_profit <= pullback_value):
                 if self.cexit_pullback_respect_roi.value == True and current_profit > min_roi:
                     return 'intrend_pullback_roi'

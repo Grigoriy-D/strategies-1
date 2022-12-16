@@ -367,34 +367,34 @@ class Predict_LSTM(IStrategy):
         # these are here for reference. Uncomment anything you want to use
 
         # # MACD
-        # macd = ta.MACD(dataframe)
-        # dataframe['macd'] = macd['macd']
-        # dataframe['macdsignal'] = macd['macdsignal']
-        # dataframe['macdhist'] = macd['macdhist']
+        macd = ta.MACD(dataframe)
+        dataframe['macd'] = macd['macd']
+        dataframe['macdsignal'] = macd['macdsignal']
+        dataframe['macdhist'] = macd['macdhist']
         #
         # # Bollinger Bands (must include these)
-        # bollinger = qtpylib.bollinger_bands(dataframe['close'], window=20, stds=2)
-        # dataframe['bb_lowerband'] = bollinger['lower']
-        # dataframe['bb_middleband'] = bollinger['mid']
-        # dataframe['bb_upperband'] = bollinger['upper']
-        # dataframe['bb_width'] = ((dataframe['bb_upperband'] - dataframe['bb_lowerband']) / dataframe['bb_middleband'])
-        # dataframe["bb_gain"] = ((dataframe["bb_upperband"] - dataframe["close"]) / dataframe["close"])
-        # dataframe["bb_loss"] = ((dataframe["bb_lowerband"] - dataframe["close"]) / dataframe["close"])
+        bollinger = qtpylib.bollinger_bands(dataframe['close'], window=20, stds=2)
+        dataframe['bb_lowerband'] = bollinger['lower']
+        dataframe['bb_middleband'] = bollinger['mid']
+        dataframe['bb_upperband'] = bollinger['upper']
+        dataframe['bb_width'] = ((dataframe['bb_upperband'] - dataframe['bb_lowerband']) / dataframe['bb_middleband'])
+        dataframe["bb_gain"] = ((dataframe["bb_upperband"] - dataframe["close"]) / dataframe["close"])
+        dataframe["bb_loss"] = ((dataframe["bb_lowerband"] - dataframe["close"]) / dataframe["close"])
         #
         # # Donchian Channels
-        # dataframe['dc_upper'] = ta.MAX(dataframe['high'], timeperiod=win_size)
-        # dataframe['dc_lower'] = ta.MIN(dataframe['low'], timeperiod=win_size)
-        # dataframe['dc_mid'] = ta.TEMA(((dataframe['dc_upper'] + dataframe['dc_lower']) / 2), timeperiod=win_size)
+        dataframe['dc_upper'] = ta.MAX(dataframe['high'], timeperiod=win_size)
+        dataframe['dc_lower'] = ta.MIN(dataframe['low'], timeperiod=win_size)
+        dataframe['dc_mid'] = ta.TEMA(((dataframe['dc_upper'] + dataframe['dc_lower']) / 2), timeperiod=win_size)
         #
-        # dataframe["dcbb_dist_upper"] = (dataframe["dc_upper"] - dataframe['bb_upperband'])
-        # dataframe["dcbb_dist_lower"] = (dataframe["dc_lower"] - dataframe['bb_lowerband'])
+        dataframe["dcbb_dist_upper"] = (dataframe["dc_upper"] - dataframe['bb_upperband'])
+        dataframe["dcbb_dist_lower"] = (dataframe["dc_lower"] - dataframe['bb_lowerband'])
         #
         # # Fibonacci Levels (of Donchian Channel)
-        # dataframe['dc_dist'] = (dataframe['dc_upper'] - dataframe['dc_lower'])
-        # dataframe['dc_hf'] = dataframe['dc_upper'] - dataframe['dc_dist'] * 0.236  # Highest Fib
-        # dataframe['dc_chf'] = dataframe['dc_upper'] - dataframe['dc_dist'] * 0.382  # Centre High Fib
-        # dataframe['dc_clf'] = dataframe['dc_upper'] - dataframe['dc_dist'] * 0.618  # Centre Low Fib
-        # dataframe['dc_lf'] = dataframe['dc_upper'] - dataframe['dc_dist'] * 0.764  # Low Fib
+        dataframe['dc_dist'] = (dataframe['dc_upper'] - dataframe['dc_lower'])
+        dataframe['dc_hf'] = dataframe['dc_upper'] - dataframe['dc_dist'] * 0.236  # Highest Fib
+        dataframe['dc_chf'] = dataframe['dc_upper'] - dataframe['dc_dist'] * 0.382  # Centre High Fib
+        dataframe['dc_clf'] = dataframe['dc_upper'] - dataframe['dc_dist'] * 0.618  # Centre Low Fib
+        dataframe['dc_lf'] = dataframe['dc_upper'] - dataframe['dc_dist'] * 0.764  # Low Fib
         #
         #  # Keltner Channels
         # keltner = qtpylib.keltner_channel(dataframe)
@@ -403,14 +403,14 @@ class Predict_LSTM(IStrategy):
         # dataframe["kc_mid"] = keltner["mid"]
         #
         # # Williams %R
-        # dataframe['wr'] = 0.02 * (williams_r(dataframe, period=14) + 50.0)
+        dataframe['wr'] = 0.02 * (williams_r(dataframe, period=14) + 50.0)
         #
         # # Fisher RSI
-        # rsi = 0.1 * (dataframe['rsi'] - 50)
-        # dataframe['fisher_rsi'] = (np.exp(2 * rsi) - 1) / (np.exp(2 * rsi) + 1)
+        rsi = 0.1 * (dataframe['rsi'] - 50)
+        dataframe['fisher_rsi'] = (np.exp(2 * rsi) - 1) / (np.exp(2 * rsi) + 1)
         #
         # # Combined Fisher RSI and Williams %R
-        # dataframe['fisher_wr'] = (dataframe['wr'] + dataframe['fisher_rsi']) / 2.0
+        dataframe['fisher_wr'] = (dataframe['wr'] + dataframe['fisher_rsi']) / 2.0
         #
         #
         # # MFI
@@ -425,37 +425,37 @@ class Predict_LSTM(IStrategy):
         # dataframe['htleadsine'] = hilbert['leadsine']
         #
         # # ADX
-        # dataframe['adx'] = ta.ADX(dataframe)
+        dataframe['adx'] = ta.ADX(dataframe)
         #
         # # Plus Directional Indicator / Movement
-        # dataframe['dm_plus'] = ta.PLUS_DM(dataframe)
-        # dataframe['di_plus'] = ta.PLUS_DI(dataframe)
+        dataframe['dm_plus'] = ta.PLUS_DM(dataframe)
+        dataframe['di_plus'] = ta.PLUS_DI(dataframe)
         #
         # # Minus Directional Indicator / Movement
-        # dataframe['dm_minus'] = ta.MINUS_DM(dataframe)
-        # dataframe['di_minus'] = ta.MINUS_DI(dataframe)
-        # dataframe['dm_delta'] = dataframe['dm_plus'] - dataframe['dm_minus']
-        # dataframe['di_delta'] = dataframe['di_plus'] - dataframe['di_minus']
+        dataframe['dm_minus'] = ta.MINUS_DM(dataframe)
+        dataframe['di_minus'] = ta.MINUS_DI(dataframe)
+        dataframe['dm_delta'] = dataframe['dm_plus'] - dataframe['dm_minus']
+        dataframe['di_delta'] = dataframe['di_plus'] - dataframe['di_minus']
 
         # # Stoch fast
-        # stoch_fast = ta.STOCHF(dataframe)
-        # dataframe['fastd'] = stoch_fast['fastd']
-        # dataframe['fastk'] = stoch_fast['fastk']
-        # dataframe['fast_diff'] = dataframe['fastd'] - dataframe['fastk']
+        stoch_fast = ta.STOCHF(dataframe)
+        dataframe['fastd'] = stoch_fast['fastd']
+        dataframe['fastk'] = stoch_fast['fastk']
+        dataframe['fast_diff'] = dataframe['fastd'] - dataframe['fastk']
         #
         # # SAR Parabol
-        # dataframe['sar'] = ta.SAR(dataframe)
+        dataframe['sar'] = ta.SAR(dataframe)
         #
         # dataframe['mom'] = ta.MOM(dataframe, timeperiod=14)
         #
         # # priming indicators
-        # dataframe['color'] = np.where((dataframe['close'] > dataframe['open']), 1.0, -1.0)
-        # dataframe['rsi_7'] = ta.RSI(dataframe, timeperiod=7)
-        # dataframe['roc_6'] = ta.ROC(dataframe, timeperiod=6)
-        # dataframe['primed'] = np.where(dataframe['color'].rolling(3).sum() == 3.0, 1.0, -1.0)
-        # dataframe['in_the_mood'] = np.where(dataframe['rsi_7'] > dataframe['rsi_7'].rolling(12).mean(), 1.0, -1.0)
-        # dataframe['moist'] = np.where(qtpylib.crossed_above(dataframe['macd'], dataframe['macdsignal']), 1.0, -1.0)
-        # dataframe['throbbing'] = np.where(dataframe['roc_6'] > dataframe['roc_6'].rolling(12).mean(), 1.0, -1.0)
+        dataframe['color'] = np.where((dataframe['close'] > dataframe['open']), 1.0, -1.0)
+        dataframe['rsi_7'] = ta.RSI(dataframe, timeperiod=7)
+        dataframe['roc_6'] = ta.ROC(dataframe, timeperiod=6)
+        dataframe['primed'] = np.where(dataframe['color'].rolling(3).sum() == 3.0, 1.0, -1.0)
+        dataframe['in_the_mood'] = np.where(dataframe['rsi_7'] > dataframe['rsi_7'].rolling(12).mean(), 1.0, -1.0)
+        dataframe['moist'] = np.where(qtpylib.crossed_above(dataframe['macd'], dataframe['macdsignal']), 1.0, -1.0)
+        dataframe['throbbing'] = np.where(dataframe['roc_6'] > dataframe['roc_6'].rolling(12).mean(), 1.0, -1.0)
         #
         # # Oscillators
         #
@@ -475,7 +475,7 @@ class Predict_LSTM(IStrategy):
         # dataframe['ao'] = qtpylib.awesome_oscillator(dataframe)
         #
         # # Commodity Channel Index: values [Oversold:-100, Overbought:100]
-        # dataframe['cci'] = ta.CCI(dataframe)
+        dataframe['cci'] = ta.CCI(dataframe)
 
         return dataframe
 
@@ -1005,7 +1005,7 @@ class Predict_LSTM(IStrategy):
     Buy Signal
     """
 
-    def populate_buy_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
+    def populate_entry_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
         conditions = []
         dataframe.loc[:, 'enter_tag'] = ''
         curr_pair = metadata['pair']
@@ -1051,7 +1051,7 @@ class Predict_LSTM(IStrategy):
     Sell Signal
     """
 
-    def populate_sell_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
+    def populate_exit_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
         conditions = []
         dataframe.loc[:, 'exit_tag'] = ''
         curr_pair = metadata['pair']
@@ -1125,7 +1125,7 @@ class Predict_LSTM(IStrategy):
     Custom Sell
     """
 
-    def custom_sell(self, pair: str, trade: 'Trade', current_time: 'datetime', current_rate: float,
+    def custom_exit(self, pair: str, trade: 'Trade', current_time: 'datetime', current_rate: float,
                     current_profit: float, **kwargs):
 
         dataframe, _ = self.dp.get_analyzed_dataframe(pair=pair, timeframe=self.timeframe)
