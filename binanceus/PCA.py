@@ -90,11 +90,11 @@ PCA - uses Principal Component Analysis to try and reduce the total set of indic
       to more manageable dimensions, and predict the next gain step.
       
       This works by creating a PCA model of the available technical indicators. This produces a 
-      mapping of the indicators and how they affect the outcome (buy/sell/hold). We choose only the
+      mapping of the indicators and how they affect the outcome (entry/exit/hold). We choose only the
       mappings that have a significant effect and ignore the others. This significantly reduces the size
       of the problem.
-      We then train a classifier model to predict buy or sell signals based on the known outcome in the
-      informative data, and use it to predict buy/sell signals based on the real-time dataframe.
+      We then train a classifier model to predict entry or exit signals based on the known outcome in the
+      informative data, and use it to predict entry/exit signals based on the real-time dataframe.
       
       Note that this is very slow to start up. This is mostly because we have to build the data on a rolling
       basis to avoid lookahead bias.
@@ -161,7 +161,7 @@ class PCA(IStrategy):
     curr_pair = ""
     custom_trade_info = {}
 
-    # profit/loss thresholds used for assessing buy/sell signals. Keep these realistic!
+    # profit/loss thresholds used for assessing entry/exit signals. Keep these realistic!
     # Note: if self.dynamic_gain_thresholds is True, these will be adjusted for each pair, based on historical mean
     default_profit_threshold = 0.3
     default_loss_threshold = -0.3
@@ -175,7 +175,7 @@ class PCA(IStrategy):
 
     # debug flags
     first_time = True  # mostly for debug
-    first_run = True  # used to identify first time through buy/sell populate funcs
+    first_run = True  # used to identify first time through entry/exit populate funcs
 
     dbg_scan_classifiers = False  # if True, scan all viable classifiers and choose the best. Very slow!
     dbg_test_classifier = True  # test clasifiers after fitting
@@ -197,33 +197,33 @@ class PCA(IStrategy):
     ## Hyperopt Variables
 
     # PCA hyperparams
-    # buy_pca_gain = IntParameter(1, 50, default=4, space='buy', load=True, optimize=True)
+    # entry_pca_gain = IntParameter(1, 50, default=4, space='entry', load=True, optimize=True)
     #
-    # sell_pca_gain = IntParameter(-1, -15, default=-4, space='sell', load=True, optimize=True)
+    # exit_pca_gain = IntParameter(-1, -15, default=-4, space='exit', load=True, optimize=True)
 
-    # Custom Sell Profit (formerly Dynamic ROI)
-    csell_roi_type = CategoricalParameter(['static', 'decay', 'step'], default='step', space='sell', load=True,
+    # Custom exit Profit (formerly Dynamic ROI)
+    cexit_roi_type = CategoricalParameter(['static', 'decay', 'step'], default='step', space='exit', load=True,
                                           optimize=True)
-    csell_roi_time = IntParameter(720, 1440, default=720, space='sell', load=True, optimize=True)
-    csell_roi_start = DecimalParameter(0.01, 0.05, default=0.01, space='sell', load=True, optimize=True)
-    csell_roi_end = DecimalParameter(0.0, 0.01, default=0, space='sell', load=True, optimize=True)
-    csell_trend_type = CategoricalParameter(['rmi', 'ssl', 'candle', 'any', 'none'], default='any', space='sell',
+    cexit_roi_time = IntParameter(720, 1440, default=720, space='exit', load=True, optimize=True)
+    cexit_roi_start = DecimalParameter(0.01, 0.05, default=0.01, space='exit', load=True, optimize=True)
+    cexit_roi_end = DecimalParameter(0.0, 0.01, default=0, space='exit', load=True, optimize=True)
+    cexit_trend_type = CategoricalParameter(['rmi', 'ssl', 'candle', 'any', 'none'], default='any', space='exit',
                                             load=True, optimize=True)
-    csell_pullback = CategoricalParameter([True, False], default=True, space='sell', load=True, optimize=True)
-    csell_pullback_amount = DecimalParameter(0.005, 0.03, default=0.01, space='sell', load=True, optimize=True)
-    csell_pullback_respect_roi = CategoricalParameter([True, False], default=False, space='sell', load=True,
+    cexit_pullback = CategoricalParameter([True, False], default=True, space='exit', load=True, optimize=True)
+    cexit_pullback_amount = DecimalParameter(0.005, 0.03, default=0.01, space='exit', load=True, optimize=True)
+    cexit_pullback_respect_roi = CategoricalParameter([True, False], default=False, space='exit', load=True,
                                                       optimize=True)
-    csell_endtrend_respect_roi = CategoricalParameter([True, False], default=False, space='sell', load=True,
+    cexit_endtrend_respect_roi = CategoricalParameter([True, False], default=False, space='exit', load=True,
                                                       optimize=True)
 
     # Custom Stoploss
-    cstop_loss_threshold = DecimalParameter(-0.05, -0.01, default=-0.03, space='sell', load=True, optimize=True)
-    cstop_bail_how = CategoricalParameter(['roc', 'time', 'any', 'none'], default='none', space='sell', load=True,
+    cstop_loss_threshold = DecimalParameter(-0.05, -0.01, default=-0.03, space='exit', load=True, optimize=True)
+    cstop_bail_how = CategoricalParameter(['roc', 'time', 'any', 'none'], default='none', space='exit', load=True,
                                           optimize=True)
-    cstop_bail_roc = DecimalParameter(-5.0, -1.0, default=-3.0, space='sell', load=True, optimize=True)
-    cstop_bail_time = IntParameter(60, 1440, default=720, space='sell', load=True, optimize=True)
-    cstop_bail_time_trend = CategoricalParameter([True, False], default=True, space='sell', load=True, optimize=True)
-    cstop_max_stoploss = DecimalParameter(-0.30, -0.01, default=-0.10, space='sell', load=True, optimize=True)
+    cstop_bail_roc = DecimalParameter(-5.0, -1.0, default=-3.0, space='exit', load=True, optimize=True)
+    cstop_bail_time = IntParameter(60, 1440, default=720, space='exit', load=True, optimize=True)
+    cstop_bail_time_trend = CategoricalParameter([True, False], default=True, space='exit', load=True, optimize=True)
+    cstop_max_stoploss = DecimalParameter(-0.30, -0.01, default=-0.10, space='exit', load=True, optimize=True)
 
     ################################
 
@@ -231,14 +231,14 @@ class PCA(IStrategy):
 
     # Note: try to combine current/historical data (from populate_indicators) with future data
     #       If you only use future data, the ML training is just guessing
-    #       Also, try to identify buy/sell ranges, rather than transitions - it gives the algorithms more chances
+    #       Also, try to identify entry/exit ranges, rather than transitions - it gives the algorithms more chances
     #       to find a correlation. The framework will select the first one anyway.
     #       In other words, avoid using qtpylib.crossed_above() and qtpylib.crossed_below()
     #       Proably OK not to check volume, because we are just looking for patterns
 
-    def get_train_buy_signals(self, future_df: DataFrame):
+    def get_train_entry_signals(self, future_df: DataFrame):
 
-        print("!!! WARNING: using base class (buy) training implementation !!!")
+        print("!!! WARNING: using base class (entry) training implementation !!!")
 
         series = np.where(
             (
@@ -248,9 +248,9 @@ class PCA(IStrategy):
 
         return series
 
-    def get_train_sell_signals(self, future_df: DataFrame):
+    def get_train_exit_signals(self, future_df: DataFrame):
 
-        print("!!! WARNING: using base class (sell) training implementation !!!")
+        print("!!! WARNING: using base class (exit) training implementation !!!")
 
         series = np.where(
             (
@@ -261,12 +261,12 @@ class PCA(IStrategy):
         return series
 
 
-    # override the following to add strategy-specific criteria to the (main) buy/sell conditions
+    # override the following to add strategy-specific criteria to the (main) entry/exit conditions
 
-    def get_strategy_buy_conditions(self, dataframe: DataFrame):
+    def get_strategy_entry_conditions(self, dataframe: DataFrame):
         return None
 
-    def get_strategy_sell_conditions(self, dataframe: DataFrame):
+    def get_strategy_exit_conditions(self, dataframe: DataFrame):
         return None
 
     ################################
@@ -326,10 +326,10 @@ class PCA(IStrategy):
                 'interval': 0,
                 'pca_size': 0,
                 'pca': None,
-                'clf_buy_name': "",
-                'clf_buy': None,
-                'clf_sell_name': "",
-                'clf_sell': None
+                'clf_entry_name': "",
+                'clf_entry': None,
+                'clf_exit_name': "",
+                'clf_exit': None
             }
         else:
             # decrement interval. When this reaches 0 it will trigger re-fitting of the data
@@ -338,29 +338,29 @@ class PCA(IStrategy):
         # populate the normal dataframe
         dataframe = self.add_indicators(dataframe)
 
-        buys, sells = self.create_training_data(dataframe)
+        entrys, exits = self.create_training_data(dataframe)
 
         # drop last group (because there cannot be a prediction)
         df = dataframe.iloc[:-self.curr_lookahead]
-        buys = buys.iloc[:-self.curr_lookahead]
-        sells = sells.iloc[:-self.curr_lookahead]
+        entrys = entrys.iloc[:-self.curr_lookahead]
+        exits = exits.iloc[:-self.curr_lookahead]
 
         # Principal Component Analysis of inf data
 
         # train the models on the informative data
         if self.dbg_verbose:
             print("    training models...")
-        self.train_models(curr_pair, df, buys, sells)
+        self.train_models(curr_pair, df, entrys, exits)
         # add predictions
 
         if self.dbg_verbose:
             print("    running predictions...")
 
         # get predictions (Note: do not modify dataframe between calls)
-        pred_buys = self.predict_buy(dataframe, curr_pair)
-        pred_sells = self.predict_sell(dataframe, curr_pair)
-        dataframe['predict_buy'] = pred_buys
-        dataframe['predict_sell'] = pred_sells
+        pred_entrys = self.predict_entry(dataframe, curr_pair)
+        pred_exits = self.predict_exit(dataframe, curr_pair)
+        dataframe['predict_entry'] = pred_entrys
+        dataframe['predict_exit'] = pred_exits
 
         # Custom Stoploss
         if self.dbg_verbose:
@@ -371,7 +371,7 @@ class PCA(IStrategy):
 
     ###################################
 
-    # add indicators used by stoploss/custom sell logic
+    # add indicators used by stoploss/custom exit logic
     def add_stoploss_indicators(self, dataframe, pair) -> DataFrame:
         if not pair in self.custom_trade_info:
             self.custom_trade_info[pair] = {}
@@ -665,7 +665,7 @@ class PCA(IStrategy):
         # dataframe['dwt_nseq_up_std'] = dataframe['dwt_nseq_up'].rolling(window=win_size).std()
         # dataframe['dwt_nseq_up_thresh'] = dataframe['dwt_nseq_up_mean'] + \
         #                                   self.n_profit_stddevs * dataframe['dwt_nseq_up_std']
-        # dataframe['dwt_nseq_sell'] = np.where(dataframe['dwt_nseq_up'] > dataframe['dwt_nseq_up_thresh'], 1.0, 0.0)
+        # dataframe['dwt_nseq_exit'] = np.where(dataframe['dwt_nseq_up'] > dataframe['dwt_nseq_up_thresh'], 1.0, 0.0)
 
         dataframe['dwt_dir_dn'] = abs(dataframe['dwt_dir'].clip(upper=0.0))
         dataframe['dwt_nseq_dn'] = dataframe['dwt_dir_dn'] * (dataframe['dwt_dir_dn'].groupby(
@@ -677,7 +677,7 @@ class PCA(IStrategy):
         # dataframe['dwt_nseq_dn_std'] = dataframe['dwt_nseq_dn'].rolling(window=win_size).std()
         # dataframe['dwt_nseq_dn_thresh'] = dataframe['dwt_nseq_dn_mean'] - self.n_loss_stddevs * dataframe[
         #     'dwt_nseq_dn_std']
-        # dataframe['dwt_nseq_buy'] = np.where(dataframe['dwt_nseq_dn'] < dataframe['dwt_nseq_dn_thresh'], 1.0, 0.0)
+        # dataframe['dwt_nseq_entry'] = np.where(dataframe['dwt_nseq_dn'] < dataframe['dwt_nseq_dn_thresh'], 1.0, 0.0)
 
         # Recent min/max
         dataframe['dwt_recent_min'] = dataframe['dwt'].rolling(window=win_size).min()
@@ -761,8 +761,8 @@ class PCA(IStrategy):
         future_df['profit_diff'] = (future_df['future_profit'] - future_df['profit_threshold']) * 10.0
         future_df['loss_diff'] = (future_df['future_loss'] - future_df['loss_threshold']) * 10.0
 
-        # future_df['buy_signal'] = np.where(future_df['profit_diff'] > 0.0, 1.0, 0.0)
-        # future_df['sell_signal'] = np.where(future_df['loss_diff'] < 0.0, -1.0, 0.0)
+        # future_df['entry_signal'] = np.where(future_df['profit_diff'] > 0.0, 1.0, 0.0)
+        # future_df['exit_signal'] = np.where(future_df['loss_diff'] < 0.0, -1.0, 0.0)
 
         # these explicitly uses dwt
         future_df['future_dwt'] = future_df['full_dwt'].shift(-lookahead)
@@ -849,30 +849,30 @@ class PCA(IStrategy):
 
     ################################
 
-    # creates the buy/sell labels absed on looking ahead into the supplied dataframe
+    # creates the entry/exit labels absed on looking ahead into the supplied dataframe
     def create_training_data(self, dataframe: DataFrame):
 
         future_df = self.add_future_data(dataframe.copy())
 
-        future_df['train_buy'] = 0.0
-        future_df['train_sell'] = 0.0
+        future_df['train_entry'] = 0.0
+        future_df['train_exit'] = 0.0
 
         # use sequence trends as criteria
-        future_df['train_buy'] = self.get_train_buy_signals(future_df)
-        future_df['train_sell'] = self.get_train_sell_signals(future_df)
+        future_df['train_entry'] = self.get_train_entry_signals(future_df)
+        future_df['train_exit'] = self.get_train_exit_signals(future_df)
 
-        buys = future_df['train_buy'].copy()
-        if buys.sum() < 3:
-            print("OOPS! <3 ({:.0f}) buy signals generated. Check training criteria".format(buys.sum()))
+        entrys = future_df['train_entry'].copy()
+        if entrys.sum() < 3:
+            print("OOPS! <3 ({:.0f}) entry signals generated. Check training criteria".format(entrys.sum()))
 
-        sells = future_df['train_sell'].copy()
-        if buys.sum() < 3:
-            print("OOPS! <3 ({:.0f}) sell signals generated. Check training criteria".format(sells.sum()))
+        exits = future_df['train_exit'].copy()
+        if entrys.sum() < 3:
+            print("OOPS! <3 ({:.0f}) exit signals generated. Check training criteria".format(exits.sum()))
 
         self.save_debug_data(future_df)
         self.save_debug_indicators(future_df)
 
-        return buys, sells
+        return entrys, exits
 
     def save_debug_data(self, future_df: DataFrame):
 
@@ -881,7 +881,7 @@ class PCA(IStrategy):
         # the func save_debug_indicators()
 
         dbg_list = [
-            'full_dwt', 'train_buy', 'train_sell',
+            'full_dwt', 'train_entry', 'train_exit',
             'future_gain', 'future_min', 'future_max',
             'profit_min', 'profit_max', 'profit_threshold',
             'loss_min', 'loss_max', 'loss_threshold',
@@ -1089,24 +1089,24 @@ class PCA(IStrategy):
         return temp
 
     # remove outliers from normalised dataframe
-    def remove_outliers(self, df_norm: DataFrame, buys, sells):
+    def remove_outliers(self, df_norm: DataFrame, entrys, exits):
 
         # for col in df_norm.columns.values:
         #     if col != 'date':
         #         df_norm = df_norm[(df_norm[col] <= 3.0)]
         # return df_norm
         df = df_norm.copy()
-        df['%temp_buy'] = buys.copy()
-        df['%temp_sell'] = sells.copy()
+        df['%temp_entry'] = entrys.copy()
+        df['%temp_exit'] = exits.copy()
         #
         df2 = df[((df >= -3.0) & (df <= 3.0)).all(axis=1)]
         # df_out = df[~((df >= -3.0) & (df <= 3.0)).all(axis=1)] # for debug
         ndrop = df_norm.shape[0] - df2.shape[0]
         if ndrop > 0:
-            b = df2['%temp_buy'].copy()
-            s = df2['%temp_sell'].copy()
-            df2.drop('%temp_buy', axis=1, inplace=True)
-            df2.drop('%temp_sell', axis=1, inplace=True)
+            b = df2['%temp_entry'].copy()
+            s = df2['%temp_exit'].copy()
+            df2.drop('%temp_entry', axis=1, inplace=True)
+            df2.drop('%temp_exit', axis=1, inplace=True)
             df2.reindex()
             # if self.dbg_verbose:
             print("    Removed ", ndrop, " outliers")
@@ -1116,85 +1116,85 @@ class PCA(IStrategy):
         else:
             # no outliers, just return originals
             df2 = df_norm
-            b = buys
-            s = sells
+            b = entrys
+            s = exits
         return df2, b, s
 
     # build a 'viable' dataframe sample set. Needed because the positive labels are sparse
-    def build_viable_dataset(self, size: int, df_norm: DataFrame, buys, sells):
+    def build_viable_dataset(self, size: int, df_norm: DataFrame, entrys, exits):
         # if self.dbg_verbose:
-        #     print("     df_norm:{} size:{} buys:{} sells:{}".format(df_norm.shape, size, buys.shape[0], sells.shape[0]))
+        #     print("     df_norm:{} size:{} entrys:{} exits:{}".format(df_norm.shape, size, entrys.shape[0], exits.shape[0]))
 
         # copy and combine the data into one dataframe
         df = df_norm.copy()
-        df['%temp_buy'] = buys.copy()
-        df['%temp_sell'] = sells.copy()
+        df['%temp_entry'] = entrys.copy()
+        df['%temp_exit'] = exits.copy()
 
-        # df_buy = df[( (df['%temp_buy'] > 0) ).all(axis=1)]
-        # df_sell = df[((df['%temp_sell'] > 0)).all(axis=1)]
-        # df_nosig = df[((df['%temp_buy'] == 0) & (df['%temp_sell'] == 0)).all(axis=1)]
+        # df_entry = df[( (df['%temp_entry'] > 0) ).all(axis=1)]
+        # df_exit = df[((df['%temp_exit'] > 0)).all(axis=1)]
+        # df_nosig = df[((df['%temp_entry'] == 0) & (df['%temp_exit'] == 0)).all(axis=1)]
 
-        df_buy = df.loc[df['%temp_buy'] == 1]
-        df_sell = df.loc[df['%temp_sell'] == 1]
-        df_nosig = df.loc[(df['%temp_buy'] == 0) & (df['%temp_sell'] == 0)]
+        df_entry = df.loc[df['%temp_entry'] == 1]
+        df_exit = df.loc[df['%temp_exit'] == 1]
+        df_nosig = df.loc[(df['%temp_entry'] == 0) & (df['%temp_exit'] == 0)]
 
-        # make sure there aren't too many buys & sells
-        # We are aiming for a roughly even split between buys, sells, and 'no signal' (no buy or sell)
+        # make sure there aren't too many entrys & exits
+        # We are aiming for a roughly even split between entrys, exits, and 'no signal' (no entry or exit)
         max_signals = int(2 * size / 3)
-        buy_train_size = df_buy.shape[0]
-        sell_train_size = df_sell.shape[0]
+        entry_train_size = df_entry.shape[0]
+        exit_train_size = df_exit.shape[0]
 
         if max_signals > df_nosig.shape[0]:
             max_signals = int((size - df_nosig.shape[0])) - 1
 
-        if ((df_buy.shape[0] + df_sell.shape[0]) > max_signals):
+        if ((df_entry.shape[0] + df_exit.shape[0]) > max_signals):
             # both exceed max?
             sig_size = int(max_signals / 2)
             # if self.dbg_verbose:
-            #     print("     sig_size:{} max_signals:{} buys:{} sells:{}".format(sig_size, max_signals, df_buy.shape[0],
-            #                                                                     df_sell.shape[0]))
+            #     print("     sig_size:{} max_signals:{} entrys:{} exits:{}".format(sig_size, max_signals, df_entry.shape[0],
+            #                                                                     df_exit.shape[0]))
 
-            if (df_buy.shape[0] > sig_size) & (df_sell.shape[0] > sig_size):
-                # resize both buy & sell to 1/3 of requested size
-                buy_train_size = sig_size
-                sell_train_size = sig_size
+            if (df_entry.shape[0] > sig_size) & (df_exit.shape[0] > sig_size):
+                # resize both entry & exit to 1/3 of requested size
+                entry_train_size = sig_size
+                exit_train_size = sig_size
             else:
                 # only one them is too big, so figure out which
-                if (df_buy.shape[0] > df_sell.shape[0]):
-                    buy_train_size = max_signals - df_sell.shape[0]
+                if (df_entry.shape[0] > df_exit.shape[0]):
+                    entry_train_size = max_signals - df_exit.shape[0]
                 else:
-                    sell_train_size = max_signals - df_buy.shape[0]
+                    exit_train_size = max_signals - df_entry.shape[0]
 
             # if self.dbg_verbose:
-            #     print("     buy_train_size:{} sell_train_size:{}".format(buy_train_size, sell_train_size))
+            #     print("     entry_train_size:{} exit_train_size:{}".format(entry_train_size, exit_train_size))
 
-        if buy_train_size < df_buy.shape[0]:
-            df_buy, _ = train_test_split(df_buy, train_size=buy_train_size, shuffle=True)
-        if sell_train_size < df_sell.shape[0]:
-            df_sell, _ = train_test_split(df_sell, train_size=sell_train_size, shuffle=True)
+        if entry_train_size < df_entry.shape[0]:
+            df_entry, _ = train_test_split(df_entry, train_size=entry_train_size, shuffle=True)
+        if exit_train_size < df_exit.shape[0]:
+            df_exit, _ = train_test_split(df_exit, train_size=exit_train_size, shuffle=True)
 
         # extract enough rows to fill the requested size
-        fill_size = size - buy_train_size - sell_train_size - 1
+        fill_size = size - entry_train_size - exit_train_size - 1
         # if self.dbg_verbose:
         #     print("     df_nosig:{} fill_size:{}".format(df_nosig.shape, fill_size))
 
         if fill_size < df_nosig.shape[0]:
             df_nosig, _ = train_test_split(df_nosig, train_size=fill_size, shuffle=True)
 
-        # print("viable df - buys:{} sells:{} fill:{}".format(df_buy.shape[0], df_sell.shape[0], df_nosig.shape[0]))
+        # print("viable df - entrys:{} exits:{} fill:{}".format(df_entry.shape[0], df_exit.shape[0], df_nosig.shape[0]))
 
         # concatenate the dataframes
-        frames = [df_buy, df_sell, df_nosig]
+        frames = [df_entry, df_exit, df_nosig]
         df2 = pd.concat(frames)
 
         # shuffle rows
         df2 = df2.sample(frac=1)
 
-        # separate out the data, buys & sells
-        b = df2['%temp_buy'].copy()
-        s = df2['%temp_sell'].copy()
-        df2.drop('%temp_buy', axis=1, inplace=True)
-        df2.drop('%temp_sell', axis=1, inplace=True)
+        # separate out the data, entrys & exits
+        b = df2['%temp_entry'].copy()
+        s = df2['%temp_exit'].copy()
+        df2.drop('%temp_entry', axis=1, inplace=True)
+        df2.drop('%temp_exit', axis=1, inplace=True)
         df2.reindex()
 
         if self.dbg_verbose:
@@ -1212,7 +1212,7 @@ class PCA(IStrategy):
 
     # train the PCA reduction and classification models
 
-    def train_models(self, curr_pair, dataframe: DataFrame, buys, sells):
+    def train_models(self, curr_pair, dataframe: DataFrame, entrys, exits):
 
         # only run if interval reaches 0 (no point retraining every camdle)
         count = self.pair_model_info[curr_pair]['interval']
@@ -1227,19 +1227,19 @@ class PCA(IStrategy):
         # Reset models for this pair. Makes it safe to just return on error
         self.pair_model_info[curr_pair]['pca_size'] = 0
         self.pair_model_info[curr_pair]['pca'] = None
-        self.pair_model_info[curr_pair]['clf_buy_name'] = ""
-        self.pair_model_info[curr_pair]['clf_buy'] = None
-        self.pair_model_info[curr_pair]['clf_sell_name'] = ""
-        self.pair_model_info[curr_pair]['clf_sell'] = None
+        self.pair_model_info[curr_pair]['clf_entry_name'] = ""
+        self.pair_model_info[curr_pair]['clf_entry'] = None
+        self.pair_model_info[curr_pair]['clf_exit_name'] = ""
+        self.pair_model_info[curr_pair]['clf_exit'] = None
 
         # check input - need at least 2 samples or classifiers will not train
-        if buys.sum() < 2:
-            print("*** ERR: insufficient buys in expected results. Check training data")
-            # print(buys)
+        if entrys.sum() < 2:
+            print("*** ERR: insufficient entrys in expected results. Check training data")
+            # print(entrys)
             return
 
-        if sells.sum() < 2:
-            print("*** ERR: insufficient sells in expected results. Check training data")
+        if exits.sum() < 2:
+            print("*** ERR: insufficient exits in expected results. Check training data")
             return
 
         rand_st = 27  # use fixed number for reproducibility
@@ -1248,41 +1248,41 @@ class PCA(IStrategy):
         if remove_outliers:
             # norm dataframe before splitting, otherwise variances are skewed
             full_df_norm = self.norm_dataframe(dataframe)
-            full_df_norm, buys, sells = self.remove_outliers(full_df_norm, buys, sells)
+            full_df_norm, entrys, exits = self.remove_outliers(full_df_norm, entrys, exits)
         else:
             full_df_norm = self.norm_dataframe(dataframe).clip(lower=-3.0, upper=3.0)  # supress outliers
 
         # constrain size to what will be available in run modes
         data_size = int(min(975, full_df_norm.shape[0]))
 
-        # get 'viable' data set (includes all buys/sells)
-        v_df_norm, v_buys, v_sells = self.build_viable_dataset(data_size, full_df_norm, buys, sells)
+        # get 'viable' data set (includes all entrys/exits)
+        v_df_norm, v_entrys, v_exits = self.build_viable_dataset(data_size, full_df_norm, entrys, exits)
 
         train_size = int(0.8 * data_size)
         test_size = data_size - train_size
 
-        df_train, df_test, train_buys, test_buys, train_sells, test_sells, = train_test_split(v_df_norm,
-                                                                                              v_buys,
-                                                                                              v_sells,
+        df_train, df_test, train_entrys, test_entrys, train_exits, test_exits, = train_test_split(v_df_norm,
+                                                                                              v_entrys,
+                                                                                              v_exits,
                                                                                               train_size=train_size,
                                                                                               random_state=rand_st,
                                                                                               shuffle=True)
         if self.dbg_verbose:
             print("     dataframe:", v_df_norm.shape, ' -> train:', df_train.shape, " + test:", df_test.shape)
-            print("     buys:", buys.shape, ' -> train:', train_buys.shape, " + test:", test_buys.shape)
-            print("     sells:", sells.shape, ' -> train:', train_sells.shape, " + test:", test_sells.shape)
+            print("     entrys:", entrys.shape, ' -> train:', train_entrys.shape, " + test:", test_entrys.shape)
+            print("     exits:", exits.shape, ' -> train:', train_exits.shape, " + test:", test_exits.shape)
 
-        print("    #training samples:", len(df_train), " #buys:", int(train_buys.sum()), ' #sells:',
-              int(train_sells.sum()))
+        print("    #training samples:", len(df_train), " #entrys:", int(train_entrys.sum()), ' #exits:',
+              int(train_exits.sum()))
 
-        # TODO: if low number of buys/sells, try k-fold sampling
+        # TODO: if low number of entrys/exits, try k-fold sampling
 
-        buy_labels = self.get_binary_labels(buys)
-        sell_labels = self.get_binary_labels(sells)
-        train_buy_labels = self.get_binary_labels(train_buys)
-        train_sell_labels = self.get_binary_labels(train_sells)
-        test_buy_labels = self.get_binary_labels(test_buys)
-        test_sell_labels = self.get_binary_labels(test_sells)
+        entry_labels = self.get_binary_labels(entrys)
+        exit_labels = self.get_binary_labels(exits)
+        train_entry_labels = self.get_binary_labels(train_entrys)
+        train_exit_labels = self.get_binary_labels(train_exits)
+        test_entry_labels = self.get_binary_labels(test_entrys)
+        test_exit_labels = self.get_binary_labels(test_exits)
 
         # create the PCA analysis model
 
@@ -1302,48 +1302,48 @@ class PCA(IStrategy):
             print("***")
             return
 
-        # Create buy/sell classifiers for the model
+        # Create entry/exit classifiers for the model
 
         # check that we have enough positives to train
-        buy_ratio = 100.0 * (train_buys.sum() / len(train_buys))
-        if (buy_ratio < 0.5):
-            print("*** ERR: insufficient number of positive buy labels ({:.2f}%)".format(buy_ratio))
+        entry_ratio = 100.0 * (train_entrys.sum() / len(train_entrys))
+        if (entry_ratio < 0.5):
+            print("*** ERR: insufficient number of positive entry labels ({:.2f}%)".format(entry_ratio))
             return
 
-        buy_clf, buy_clf_name = self.get_buy_classifier(df_train_pca, train_buy_labels)
+        entry_clf, entry_clf_name = self.get_entry_classifier(df_train_pca, train_entry_labels)
 
-        sell_ratio = 100.0 * (train_sells.sum() / len(train_sells))
-        if (sell_ratio < 0.5):
-            print("*** ERR: insufficient number of positive sell labels ({:.2f}%)".format(sell_ratio))
+        exit_ratio = 100.0 * (train_exits.sum() / len(train_exits))
+        if (exit_ratio < 0.5):
+            print("*** ERR: insufficient number of positive exit labels ({:.2f}%)".format(exit_ratio))
             return
 
-        sell_clf, sell_clf_name = self.get_sell_classifier(df_train_pca, train_sell_labels)
+        exit_clf, exit_clf_name = self.get_exit_classifier(df_train_pca, train_exit_labels)
 
         # save the models
 
         self.pair_model_info[curr_pair]['pca'] = pca
         self.pair_model_info[curr_pair]['pca_size'] = df_train_pca.shape[1]
-        self.pair_model_info[curr_pair]['clf_buy_name'] = buy_clf_name
-        self.pair_model_info[curr_pair]['clf_buy'] = buy_clf
-        self.pair_model_info[curr_pair]['clf_sell_name'] = sell_clf_name
-        self.pair_model_info[curr_pair]['clf_sell'] = sell_clf
+        self.pair_model_info[curr_pair]['clf_entry_name'] = entry_clf_name
+        self.pair_model_info[curr_pair]['clf_entry'] = entry_clf
+        self.pair_model_info[curr_pair]['clf_exit_name'] = exit_clf_name
+        self.pair_model_info[curr_pair]['clf_exit'] = exit_clf
 
         # if scan specified, test against the test dataframe
         if self.dbg_test_classifier and self.dbg_verbose:
 
             df_test_pca = DataFrame(pca.transform(df_test))
-            if not (buy_clf is None):
-                pred_buys = buy_clf.predict(df_test_pca)
+            if not (entry_clf is None):
+                pred_entrys = entry_clf.predict(df_test_pca)
                 print("")
-                print("Predict - Buy Signals (", type(buy_clf).__name__, ")")
-                print(classification_report(test_buy_labels, pred_buys))
+                print("Predict - entry Signals (", type(entry_clf).__name__, ")")
+                print(classification_report(test_entry_labels, pred_entrys))
                 print("")
 
-            if not (sell_clf is None):
-                pred_sells = sell_clf.predict(df_test_pca)
+            if not (exit_clf is None):
+                pred_exits = exit_clf.predict(df_test_pca)
                 print("")
-                print("Predict - Sell Signals (", type(sell_clf).__name__, ")")
-                print(classification_report(test_sell_labels, pred_sells))
+                print("Predict - exit Signals (", type(exit_clf).__name__, ")")
+                print(classification_report(test_exit_labels, pred_exits))
                 print("")
 
     autoencoder = None
@@ -1440,7 +1440,7 @@ class PCA(IStrategy):
             # pca = LocallyLinearEmbedding(n_components=4, eigen_solver='dense', method="modified").fit(df_norm)
             if self.autoencoder is None:
                 # self.autoencoder = AutoEncoder(df_norm.shape[1])
-                self.autoencoder = CompressionAutoEncoder(df_norm.shape[1], tag="Buy")
+                self.autoencoder = CompressionAutoEncoder(df_norm.shape[1], tag="entry")
             pca = self.autoencoder
 
         elif pca_type == 5:
@@ -1530,7 +1530,7 @@ class PCA(IStrategy):
         # print(l3.head())
 
     # get a classifier for the supplied dataframe (normalised) and known results
-    def get_buy_classifier(self, df_norm: DataFrame, results):
+    def get_entry_classifier(self, df_norm: DataFrame, results):
 
         clf = None
         name = ""
@@ -1538,20 +1538,20 @@ class PCA(IStrategy):
 
         if results.sum() <= 2:
             print("***")
-            print("*** ERR: insufficient positive results in buy data")
+            print("*** ERR: insufficient positive results in entry data")
             print("***")
             return clf, name
 
         # If already done, just get previous result and re-fit
-        if self.pair_model_info[self.curr_pair]['clf_buy']:
-            clf = self.pair_model_info[self.curr_pair]['clf_buy']
+        if self.pair_model_info[self.curr_pair]['clf_entry']:
+            clf = self.pair_model_info[self.curr_pair]['clf_entry']
             clf = clf.fit(df_norm, labels)
-            name = self.pair_model_info[self.curr_pair]['clf_buy_name']
+            name = self.pair_model_info[self.curr_pair]['clf_entry_name']
         else:
             if self.dbg_scan_classifiers:
                 if self.dbg_verbose:
-                    print("    Finding best buy classifier:")
-                clf, name = self.find_best_classifier(df_norm, labels, tag="buy")
+                    print("    Finding best entry classifier:")
+                clf, name = self.find_best_classifier(df_norm, labels, tag="entry")
             else:
                 clf, name = self.classifier_factory(self.default_classifier, df_norm, labels)
                 clf = clf.fit(df_norm, labels)
@@ -1559,7 +1559,7 @@ class PCA(IStrategy):
         return clf, name
 
     # get a classifier for the supplied dataframe (normalised) and known results
-    def get_sell_classifier(self, df_norm: DataFrame, results):
+    def get_exit_classifier(self, df_norm: DataFrame, results):
 
         clf = None
         name = ""
@@ -1567,20 +1567,20 @@ class PCA(IStrategy):
 
         if results.sum() <= 2:
             print("***")
-            print("*** ERR: insufficient positive results in sell data")
+            print("*** ERR: insufficient positive results in exit data")
             print("***")
             return clf, name
 
         # If already done, just get previous result and re-fit
-        if self.pair_model_info[self.curr_pair]['clf_sell']:
-            clf = self.pair_model_info[self.curr_pair]['clf_sell']
+        if self.pair_model_info[self.curr_pair]['clf_exit']:
+            clf = self.pair_model_info[self.curr_pair]['clf_exit']
             clf = clf.fit(df_norm, labels)
-            name = self.pair_model_info[self.curr_pair]['clf_sell_name']
+            name = self.pair_model_info[self.curr_pair]['clf_exit_name']
         else:
             if self.dbg_scan_classifiers:
                 if self.dbg_verbose:
-                    print("    Finding best sell classifier:")
-                clf, name = self.find_best_classifier(df_norm, labels, tag="sell")
+                    print("    Finding best exit classifier:")
+                clf, name = self.find_best_classifier(df_norm, labels, tag="exit")
             else:
                 clf, name = self.classifier_factory(self.default_classifier, df_norm, labels)
                 clf = clf.fit(df_norm, labels)
@@ -1780,66 +1780,66 @@ class PCA(IStrategy):
         # print (predict)
         return predict
 
-    def predict_buy(self, df: DataFrame, pair):
-        clf = self.pair_model_info[pair]['clf_buy']
+    def predict_entry(self, df: DataFrame, pair):
+        clf = self.pair_model_info[pair]['clf_entry']
 
         if clf is None:
-            print("    No Buy Classifier for pair ", pair, " -Skipping predictions")
+            print("    No entry Classifier for pair ", pair, " -Skipping predictions")
             self.pair_model_info[pair]['interval'] = min(self.pair_model_info[pair]['interval'], 4)
             predict = df['close'].copy()  # just to get the size
             predict = 0.0
             return predict
 
-        print("    predicting buys...")
+        print("    predicting entrys...")
         predict = self.predict(df, pair, clf)
 
         # if self.dbg_test_classifier:
         #     # DEBUG: check accuracy
-        #     signals = df['train_buy_signal']
+        #     signals = df['train_entry_signal']
         #     labels = self.get_binary_labels(signals)
         #
         #     if  self.dbg_verbose:
         #         print("")
-        #         print("Predict - Buy Signals (", type(clf).__name__, ")")
+        #         print("Predict - entry Signals (", type(clf).__name__, ")")
         #         print(classification_report(labels, predict))
         #         print("")
         #
         #     score = f1_score(labels, predict, average='macro')
         #     if score <= 0.5:
         #         print("")
-        #         print("!!! WARNING: (buy) F1 score below 51% ({:.3f})".format(score))
+        #         print("!!! WARNING: (entry) F1 score below 51% ({:.3f})".format(score))
         #         print("    Classifier:", type(clf).__name__)
         #         print("")
 
         return predict
 
-    def predict_sell(self, df: DataFrame, pair):
-        clf = self.pair_model_info[pair]['clf_sell']
+    def predict_exit(self, df: DataFrame, pair):
+        clf = self.pair_model_info[pair]['clf_exit']
         if clf is None:
-            print("    No Sell Classifier for pair ", pair, " -Skipping predictions")
+            print("    No exit Classifier for pair ", pair, " -Skipping predictions")
             self.pair_model_info[pair]['interval'] = min(self.pair_model_info[pair]['interval'], 4)
             predict = df['close']  # just to get the size
             predict = 0.0
             return predict
 
-        print("    predicting sells...")
+        print("    predicting exits...")
         predict = self.predict(df, pair, clf)
 
         # if self.dbg_test_classifier:
         #     # DEBUG: check accuracy
-        #     signals = df['train_sell_signal']
+        #     signals = df['train_exit_signal']
         #     labels = self.get_binary_labels(signals)
         #
         #     if self.dbg_verbose:
         #         print("")
-        #         print("Predict - Sell Signals (", type(clf).__name__, ")")
+        #         print("Predict - exit Signals (", type(clf).__name__, ")")
         #         print(classification_report(labels, predict))
         #         print("")
         #
         #     score = f1_score(labels, predict, average='macro')
         #     if score <= 0.5:
         #         print("")
-        #         print("!!! WARNING: (buy) F1 score below 51% ({:.3f})".format(score))
+        #         print("!!! WARNING: (entry) F1 score below 51% ({:.3f})".format(score))
         #         print("    Classifier:", type(clf).__name__)
         #         print("")
 
@@ -1873,7 +1873,7 @@ class PCA(IStrategy):
         if (len(self.pair_model_info) > 0):
             # print("Model Info:")
             # print("----------")
-            table = PrettyTable(["Pair", "PCA Size", "Buy Classifier", "Sell Classifier"])
+            table = PrettyTable(["Pair", "PCA Size", "entry Classifier", "exit Classifier"])
             table.title = "Model Information"
             table.align = "l"
             table.align["PCA Size"] = "c"
@@ -1883,8 +1883,8 @@ class PCA(IStrategy):
             for pair in self.pair_model_info:
                 table.add_row([pair,
                                self.pair_model_info[pair]['pca_size'],
-                               self.pair_model_info[pair]['clf_buy_name'],
-                               self.pair_model_info[pair]['clf_sell_name']
+                               self.pair_model_info[pair]['clf_entry_name'],
+                               self.pair_model_info[pair]['clf_exit_name']
                                ])
 
             print(table)
@@ -1893,33 +1893,33 @@ class PCA(IStrategy):
             # print("Classifier Statistics:")
             # print("---------------------")
             print("")
-            if 'buy' in self.classifier_stats:
+            if 'entry' in self.classifier_stats:
                 print("")
                 table = PrettyTable(["Classifier", "Mean Score", "Selected"])
-                table.title = "Buy Classifiers"
+                table.title = "entry Classifiers"
                 table.align["Classifier"] = "l"
                 table.align["Mean Score"] = "c"
                 table.float_format = '.4'
-                for cls in self.classifier_stats['buy']:
+                for cls in self.classifier_stats['entry']:
                     table.add_row([cls,
-                                   self.classifier_stats['buy'][cls]['score'],
-                                   self.classifier_stats['buy'][cls]['selected']])
+                                   self.classifier_stats['entry'][cls]['score'],
+                                   self.classifier_stats['entry'][cls]['selected']])
                 table.reversesort = True
                 # table.sortby = 'Mean Score'
                 print(table.get_string(sort_key=operator.itemgetter(2, 1), sortby="Selected"))
                 print("")
 
-            if 'sell' in self.classifier_stats:
+            if 'exit' in self.classifier_stats:
                 print("")
                 table = PrettyTable(["Classifier", "Mean Score", "Selected"])
-                table.title = "Sell Classifiers"
+                table.title = "exit Classifiers"
                 table.align["Classifier"] = "l"
                 table.align["Mean Score"] = "c"
                 table.float_format = '.4'
-                for cls in self.classifier_stats['sell']:
+                for cls in self.classifier_stats['exit']:
                     table.add_row([cls,
-                                   self.classifier_stats['sell'][cls]['score'],
-                                   self.classifier_stats['sell'][cls]['selected']])
+                                   self.classifier_stats['exit'][cls]['score'],
+                                   self.classifier_stats['exit'][cls]['selected']])
                 table.reversesort = True
                 # table.sortby = 'Mean Score'
                 print(table.get_string(sort_key=operator.itemgetter(2, 1), sortby="Selected"))
@@ -1930,10 +1930,10 @@ class PCA(IStrategy):
     ###################################
 
     """
-    Buy Signal
+    entry Signal
     """
 
-    def populate_buy_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
+    def populate_entry_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
         conditions = []
         dataframe.loc[:, 'enter_tag'] = ''
         curr_pair = metadata['pair']
@@ -1948,7 +1948,7 @@ class PCA(IStrategy):
 
         # add some fairly loose guards, to help prevent 'bad' predictions
 
-        # # ATR in buy range
+        # # ATR in entry range
         # conditions.append(dataframe['atr_signal'] > 0.0)
 
         # some trading volume
@@ -1962,12 +1962,12 @@ class PCA(IStrategy):
 
         # PCA/Classifier triggers
         pca_cond = (
-            (qtpylib.crossed_above(dataframe['predict_buy'], 0.5))
+            (qtpylib.crossed_above(dataframe['predict_entry'], 0.5))
         )
         conditions.append(pca_cond)
 
         # add strategy-specific conditions (from subclass)
-        strat_cond = self.get_strategy_buy_conditions(dataframe)
+        strat_cond = self.get_strategy_entry_conditions(dataframe)
         if strat_cond is not None:
             conditions.append(strat_cond)
 
@@ -1975,19 +1975,19 @@ class PCA(IStrategy):
         dataframe.loc[pca_cond, 'enter_tag'] += 'pca_entry '
 
         if conditions:
-            dataframe.loc[reduce(lambda x, y: x & y, conditions), 'buy'] = 1
+            dataframe.loc[reduce(lambda x, y: x & y, conditions), 'entry'] = 1
         else:
-            dataframe['buy'] = 0
+            dataframe['entry'] = 0
 
         return dataframe
 
     ###################################
 
     """
-    Sell Signal
+    exit Signal
     """
 
-    def populate_sell_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
+    def populate_exit_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
         conditions = []
         dataframe.loc[:, 'exit_tag'] = ''
         curr_pair = metadata['pair']
@@ -2010,22 +2010,22 @@ class PCA(IStrategy):
 
         # PCA triggers
         pca_cond = (
-            qtpylib.crossed_above(dataframe['predict_sell'], 0.5)
+            qtpylib.crossed_above(dataframe['predict_exit'], 0.5)
         )
 
         conditions.append(pca_cond)
 
         # add strategy-specific conditions (from subclass)
-        strat_cond = self.get_strategy_sell_conditions(dataframe)
+        strat_cond = self.get_strategy_exit_conditions(dataframe)
         if strat_cond is not None:
             conditions.append(strat_cond)
 
         dataframe.loc[pca_cond, 'exit_tag'] += 'pca_exit '
 
         if conditions:
-            dataframe.loc[reduce(lambda x, y: x & y, conditions), 'sell'] = 1
+            dataframe.loc[reduce(lambda x, y: x & y, conditions), 'exit'] = 1
         else:
-            dataframe['sell'] = 0
+            dataframe['exit'] = 0
 
         return dataframe
 
@@ -2049,7 +2049,7 @@ class PCA(IStrategy):
         if current_profit < self.cstop_max_stoploss.value:
             return 0.01
 
-        # Determine how we sell when we are in a loss
+        # Determine how we exit when we are in a loss
         if current_profit < self.cstop_loss_threshold.value:
             if self.cstop_bail_how.value == 'roc' or self.cstop_bail_how.value == 'any':
                 # Dynamic bailout based on rate of change
@@ -2067,10 +2067,10 @@ class PCA(IStrategy):
     ###################################
 
     """
-    Custom Sell
+    Custom exit
     """
 
-    def custom_sell(self, pair: str, trade: 'Trade', current_time: 'datetime', current_rate: float,
+    def custom_exit(self, pair: str, trade: 'Trade', current_time: 'datetime', current_rate: float,
                     current_profit: float, **kwargs):
 
         dataframe, _ = self.dp.get_analyzed_dataframe(pair=pair, timeframe=self.timeframe)
@@ -2078,51 +2078,51 @@ class PCA(IStrategy):
 
         trade_dur = int((current_time.timestamp() - trade.open_date_utc.timestamp()) // 60)
         max_profit = max(0, trade.calc_profit_ratio(trade.max_rate))
-        pullback_value = max(0, (max_profit - self.csell_pullback_amount.value))
+        pullback_value = max(0, (max_profit - self.cexit_pullback_amount.value))
         in_trend = False
 
         # Mod: just take the profit:
-        # Above 3%, sell if MFA > 90
+        # Above 3%, exit if MFA > 90
         if current_profit > 0.03:
             if last_candle['mfi'] > 90:
                 return 'mfi_90'
 
-        # Sell any positions at a loss if they are held for more than one day.
+        # exit any positions at a loss if they are held for more than one day.
         if current_profit < 0.0 and (current_time - trade.open_date_utc).days >= 2:
             return 'unclog'
 
         # Determine our current ROI point based on the defined type
-        if self.csell_roi_type.value == 'static':
-            min_roi = self.csell_roi_start.value
-        elif self.csell_roi_type.value == 'decay':
-            min_roi = cta.linear_decay(self.csell_roi_start.value, self.csell_roi_end.value, 0,
-                                       self.csell_roi_time.value, trade_dur)
-        elif self.csell_roi_type.value == 'step':
-            if trade_dur < self.csell_roi_time.value:
-                min_roi = self.csell_roi_start.value
+        if self.cexit_roi_type.value == 'static':
+            min_roi = self.cexit_roi_start.value
+        elif self.cexit_roi_type.value == 'decay':
+            min_roi = cta.linear_decay(self.cexit_roi_start.value, self.cexit_roi_end.value, 0,
+                                       self.cexit_roi_time.value, trade_dur)
+        elif self.cexit_roi_type.value == 'step':
+            if trade_dur < self.cexit_roi_time.value:
+                min_roi = self.cexit_roi_start.value
             else:
-                min_roi = self.csell_roi_end.value
+                min_roi = self.cexit_roi_end.value
 
         # Determine if there is a trend
-        if self.csell_trend_type.value == 'rmi' or self.csell_trend_type.value == 'any':
+        if self.cexit_trend_type.value == 'rmi' or self.cexit_trend_type.value == 'any':
             if last_candle['rmi_up_trend'] == 1:
                 in_trend = True
-        if self.csell_trend_type.value == 'ssl' or self.csell_trend_type.value == 'any':
+        if self.cexit_trend_type.value == 'ssl' or self.cexit_trend_type.value == 'any':
             if last_candle['ssl_dir'] == 1:
                 in_trend = True
-        if self.csell_trend_type.value == 'candle' or self.csell_trend_type.value == 'any':
+        if self.cexit_trend_type.value == 'candle' or self.cexit_trend_type.value == 'any':
             if last_candle['candle_up_trend'] == 1:
                 in_trend = True
 
-        # Don't sell if we are in a trend unless the pullback threshold is met
+        # Don't exit if we are in a trend unless the pullback threshold is met
         if in_trend == True and current_profit > 0:
-            # Record that we were in a trend for this trade/pair for a more useful sell message later
+            # Record that we were in a trend for this trade/pair for a more useful exit message later
             self.custom_trade_info[trade.pair]['had_trend'] = True
-            # If pullback is enabled and profit has pulled back allow a sell, maybe
-            if self.csell_pullback.value == True and (current_profit <= pullback_value):
-                if self.csell_pullback_respect_roi.value == True and current_profit > min_roi:
+            # If pullback is enabled and profit has pulled back allow a exit, maybe
+            if self.cexit_pullback.value == True and (current_profit <= pullback_value):
+                if self.cexit_pullback_respect_roi.value == True and current_profit > min_roi:
                     return 'intrend_pullback_roi'
-                elif self.csell_pullback_respect_roi.value == False:
+                elif self.cexit_pullback_respect_roi.value == False:
                     if current_profit > min_roi:
                         return 'intrend_pullback_roi'
                     else:
@@ -2135,7 +2135,7 @@ class PCA(IStrategy):
                 if current_profit > min_roi:
                     self.custom_trade_info[trade.pair]['had_trend'] = False
                     return 'trend_roi'
-                elif self.csell_endtrend_respect_roi.value == False:
+                elif self.cexit_endtrend_respect_roi.value == False:
                     self.custom_trade_info[trade.pair]['had_trend'] = False
                     return 'trend_noroi'
             elif current_profit > min_roi:
