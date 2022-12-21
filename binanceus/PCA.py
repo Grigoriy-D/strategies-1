@@ -338,11 +338,11 @@ class PCA(IStrategy):
         # populate the normal dataframe
         dataframe = self.add_indicators(dataframe)
 
-        entrys, exits = self.create_training_data(dataframe)
+        entries, exits = self.create_training_data(dataframe)
 
         # drop last group (because there cannot be a prediction)
         df = dataframe.iloc[:-self.curr_lookahead]
-        entrys = entrys.iloc[:-self.curr_lookahead]
+        entries = entries.iloc[:-self.curr_lookahead]
         exits = exits.iloc[:-self.curr_lookahead]
 
         # Principal Component Analysis of inf data
@@ -350,16 +350,16 @@ class PCA(IStrategy):
         # train the models on the informative data
         if self.dbg_verbose:
             print("    training models...")
-        self.train_models(curr_pair, df, entrys, exits)
+        self.train_models(curr_pair, df, entries, exits)
         # add predictions
 
         if self.dbg_verbose:
             print("    running predictions...")
 
         # get predictions (Note: do not modify dataframe between calls)
-        pred_entrys = self.predict_entry(dataframe, curr_pair)
+        pred_entries = self.predict_entry(dataframe, curr_pair)
         pred_exits = self.predict_exit(dataframe, curr_pair)
-        dataframe['predict_entry'] = pred_entrys
+        dataframe['predict_entry'] = pred_entries
         dataframe['predict_exit'] = pred_exits
 
         # Custom Stoploss
@@ -861,18 +861,18 @@ class PCA(IStrategy):
         future_df['train_entry'] = self.get_train_entry_signals(future_df)
         future_df['train_exit'] = self.get_train_exit_signals(future_df)
 
-        entrys = future_df['train_entry'].copy()
-        if entrys.sum() < 3:
-            print("OOPS! <3 ({:.0f}) entry signals generated. Check training criteria".format(entrys.sum()))
+        entries = future_df['train_entry'].copy()
+        if entries.sum() < 3:
+            print("OOPS! <3 ({:.0f}) entry signals generated. Check training criteria".format(entries.sum()))
 
         exits = future_df['train_exit'].copy()
-        if entrys.sum() < 3:
+        if entries.sum() < 3:
             print("OOPS! <3 ({:.0f}) exit signals generated. Check training criteria".format(exits.sum()))
 
         self.save_debug_data(future_df)
         self.save_debug_indicators(future_df)
 
-        return entrys, exits
+        return entries, exits
 
     def save_debug_data(self, future_df: DataFrame):
 
@@ -1089,14 +1089,14 @@ class PCA(IStrategy):
         return temp
 
     # remove outliers from normalised dataframe
-    def remove_outliers(self, df_norm: DataFrame, entrys, exits):
+    def remove_outliers(self, df_norm: DataFrame, entries, exits):
 
         # for col in df_norm.columns.values:
         #     if col != 'date':
         #         df_norm = df_norm[(df_norm[col] <= 3.0)]
         # return df_norm
         df = df_norm.copy()
-        df['%temp_entry'] = entrys.copy()
+        df['%temp_entry'] = entries.copy()
         df['%temp_exit'] = exits.copy()
         #
         df2 = df[((df >= -3.0) & (df <= 3.0)).all(axis=1)]
@@ -1116,18 +1116,18 @@ class PCA(IStrategy):
         else:
             # no outliers, just return originals
             df2 = df_norm
-            b = entrys
+            b = entries
             s = exits
         return df2, b, s
 
     # build a 'viable' dataframe sample set. Needed because the positive labels are sparse
-    def build_viable_dataset(self, size: int, df_norm: DataFrame, entrys, exits):
+    def build_viable_dataset(self, size: int, df_norm: DataFrame, entries, exits):
         # if self.dbg_verbose:
-        #     print("     df_norm:{} size:{} entrys:{} exits:{}".format(df_norm.shape, size, entrys.shape[0], exits.shape[0]))
+        #     print("     df_norm:{} size:{} entries:{} exits:{}".format(df_norm.shape, size, entries.shape[0], exits.shape[0]))
 
         # copy and combine the data into one dataframe
         df = df_norm.copy()
-        df['%temp_entry'] = entrys.copy()
+        df['%temp_entry'] = entries.copy()
         df['%temp_exit'] = exits.copy()
 
         # df_entry = df[( (df['%temp_entry'] > 0) ).all(axis=1)]
@@ -1138,8 +1138,8 @@ class PCA(IStrategy):
         df_exit = df.loc[df['%temp_exit'] == 1]
         df_nosig = df.loc[(df['%temp_entry'] == 0) & (df['%temp_exit'] == 0)]
 
-        # make sure there aren't too many entrys & exits
-        # We are aiming for a roughly even split between entrys, exits, and 'no signal' (no entry or exit)
+        # make sure there aren't too many entries & exits
+        # We are aiming for a roughly even split between entries, exits, and 'no signal' (no entry or exit)
         max_signals = int(2 * size / 3)
         entry_train_size = df_entry.shape[0]
         exit_train_size = df_exit.shape[0]
@@ -1151,7 +1151,7 @@ class PCA(IStrategy):
             # both exceed max?
             sig_size = int(max_signals / 2)
             # if self.dbg_verbose:
-            #     print("     sig_size:{} max_signals:{} entrys:{} exits:{}".format(sig_size, max_signals, df_entry.shape[0],
+            #     print("     sig_size:{} max_signals:{} entries:{} exits:{}".format(sig_size, max_signals, df_entry.shape[0],
             #                                                                     df_exit.shape[0]))
 
             if (df_entry.shape[0] > sig_size) & (df_exit.shape[0] > sig_size):
@@ -1181,7 +1181,7 @@ class PCA(IStrategy):
         if fill_size < df_nosig.shape[0]:
             df_nosig, _ = train_test_split(df_nosig, train_size=fill_size, shuffle=True)
 
-        # print("viable df - entrys:{} exits:{} fill:{}".format(df_entry.shape[0], df_exit.shape[0], df_nosig.shape[0]))
+        # print("viable df - entries:{} exits:{} fill:{}".format(df_entry.shape[0], df_exit.shape[0], df_nosig.shape[0]))
 
         # concatenate the dataframes
         frames = [df_entry, df_exit, df_nosig]
@@ -1190,7 +1190,7 @@ class PCA(IStrategy):
         # shuffle rows
         df2 = df2.sample(frac=1)
 
-        # separate out the data, entrys & exits
+        # separate out the data, entries & exits
         b = df2['%temp_entry'].copy()
         s = df2['%temp_exit'].copy()
         df2.drop('%temp_entry', axis=1, inplace=True)
@@ -1212,7 +1212,7 @@ class PCA(IStrategy):
 
     # train the PCA reduction and classification models
 
-    def train_models(self, curr_pair, dataframe: DataFrame, entrys, exits):
+    def train_models(self, curr_pair, dataframe: DataFrame, entries, exits):
 
         # only run if interval reaches 0 (no point retraining every camdle)
         count = self.pair_model_info[curr_pair]['interval']
@@ -1233,9 +1233,9 @@ class PCA(IStrategy):
         self.pair_model_info[curr_pair]['clf_exit'] = None
 
         # check input - need at least 2 samples or classifiers will not train
-        if entrys.sum() < 2:
-            print("*** ERR: insufficient entrys in expected results. Check training data")
-            # print(entrys)
+        if entries.sum() < 2:
+            print("*** ERR: insufficient entries in expected results. Check training data")
+            # print(entries)
             return
 
         if exits.sum() < 2:
@@ -1248,40 +1248,40 @@ class PCA(IStrategy):
         if remove_outliers:
             # norm dataframe before splitting, otherwise variances are skewed
             full_df_norm = self.norm_dataframe(dataframe)
-            full_df_norm, entrys, exits = self.remove_outliers(full_df_norm, entrys, exits)
+            full_df_norm, entries, exits = self.remove_outliers(full_df_norm, entries, exits)
         else:
             full_df_norm = self.norm_dataframe(dataframe).clip(lower=-3.0, upper=3.0)  # supress outliers
 
         # constrain size to what will be available in run modes
         data_size = int(min(975, full_df_norm.shape[0]))
 
-        # get 'viable' data set (includes all entrys/exits)
-        v_df_norm, v_entrys, v_exits = self.build_viable_dataset(data_size, full_df_norm, entrys, exits)
+        # get 'viable' data set (includes all entries/exits)
+        v_df_norm, v_entries, v_exits = self.build_viable_dataset(data_size, full_df_norm, entries, exits)
 
         train_size = int(0.8 * data_size)
         test_size = data_size - train_size
 
-        df_train, df_test, train_entrys, test_entrys, train_exits, test_exits, = train_test_split(v_df_norm,
-                                                                                              v_entrys,
+        df_train, df_test, train_entries, test_entries, train_exits, test_exits, = train_test_split(v_df_norm,
+                                                                                              v_entries,
                                                                                               v_exits,
                                                                                               train_size=train_size,
                                                                                               random_state=rand_st,
                                                                                               shuffle=True)
         if self.dbg_verbose:
             print("     dataframe:", v_df_norm.shape, ' -> train:', df_train.shape, " + test:", df_test.shape)
-            print("     entrys:", entrys.shape, ' -> train:', train_entrys.shape, " + test:", test_entrys.shape)
+            print("     entries:", entries.shape, ' -> train:', train_entries.shape, " + test:", test_entries.shape)
             print("     exits:", exits.shape, ' -> train:', train_exits.shape, " + test:", test_exits.shape)
 
-        print("    #training samples:", len(df_train), " #entrys:", int(train_entrys.sum()), ' #exits:',
+        print("    #training samples:", len(df_train), " #entries:", int(train_entries.sum()), ' #exits:',
               int(train_exits.sum()))
 
-        # TODO: if low number of entrys/exits, try k-fold sampling
+        # TODO: if low number of entries/exits, try k-fold sampling
 
-        entry_labels = self.get_binary_labels(entrys)
+        entry_labels = self.get_binary_labels(entries)
         exit_labels = self.get_binary_labels(exits)
-        train_entry_labels = self.get_binary_labels(train_entrys)
+        train_entry_labels = self.get_binary_labels(train_entries)
         train_exit_labels = self.get_binary_labels(train_exits)
-        test_entry_labels = self.get_binary_labels(test_entrys)
+        test_entry_labels = self.get_binary_labels(test_entries)
         test_exit_labels = self.get_binary_labels(test_exits)
 
         # create the PCA analysis model
@@ -1305,7 +1305,7 @@ class PCA(IStrategy):
         # Create entry/exit classifiers for the model
 
         # check that we have enough positives to train
-        entry_ratio = 100.0 * (train_entrys.sum() / len(train_entrys))
+        entry_ratio = 100.0 * (train_entries.sum() / len(train_entries))
         if (entry_ratio < 0.5):
             print("*** ERR: insufficient number of positive entry labels ({:.2f}%)".format(entry_ratio))
             return
@@ -1333,10 +1333,10 @@ class PCA(IStrategy):
 
             df_test_pca = DataFrame(pca.transform(df_test))
             if not (entry_clf is None):
-                pred_entrys = entry_clf.predict(df_test_pca)
+                pred_entries = entry_clf.predict(df_test_pca)
                 print("")
                 print("Predict - entry Signals (", type(entry_clf).__name__, ")")
-                print(classification_report(test_entry_labels, pred_entrys))
+                print(classification_report(test_entry_labels, pred_entries))
                 print("")
 
             if not (exit_clf is None):
@@ -1790,7 +1790,7 @@ class PCA(IStrategy):
             predict = 0.0
             return predict
 
-        print("    predicting entrys...")
+        print("    predicting entries...")
         predict = self.predict(df, pair, clf)
 
         # if self.dbg_test_classifier:
@@ -1873,7 +1873,7 @@ class PCA(IStrategy):
         if (len(self.pair_model_info) > 0):
             # print("Model Info:")
             # print("----------")
-            table = PrettyTable(["Pair", "PCA Size", "entry Classifier", "exit Classifier"])
+            table = PrettyTable(["Pair", "PCA Size", "Entry Classifier", "Exit Classifier"])
             table.title = "Model Information"
             table.align = "l"
             table.align["PCA Size"] = "c"
@@ -1930,7 +1930,7 @@ class PCA(IStrategy):
     ###################################
 
     """
-    entry Signal
+    Entry Signal
     """
 
     def populate_entry_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
