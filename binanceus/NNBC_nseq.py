@@ -43,7 +43,7 @@ from NNBC import NNBC
 
 """
 ####################################################################################
-NNBC_jump:
+NNBC_nesq:
     This is a subclass of NNBC, which provides a framework for deriving a neural network model
     This class trains the model based on consecutive sequences of up/down candles, followed by big profit/loss
 

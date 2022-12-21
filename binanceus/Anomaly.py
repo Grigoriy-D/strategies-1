@@ -96,9 +96,9 @@ from AnomalyDetector_LSTM import AnomalyDetector_LSTM
 ####################################################################################
 Anomaly - Anomaly Detection Classifier
     
-    This strategy uses anomaly detection as a means to identify buys/sells
-    The theory is that there are many more non-buy or non-sell signals that buy/sell signals
-    So, we train an autoencoder on the 'normal' data, and any anomalies detected are then buy or sell signals.
+    This strategy uses anomaly detection as a means to identify entries/exits
+    The theory is that there are many more non-entry or non-exit signals that entry/exit signals
+    So, we train an autoencoder on the 'normal' data, and any anomalies detected are then entry or exit signals.
     
     Note that the anomaly detection classifiers will look for a pre-trained model and load that if present. This
     means you can pre-train models in backtesting and use then in live runs
@@ -124,10 +124,10 @@ class Anomaly(IStrategy):
         },
         'subplots': {
             "Diff": {
-                '%train_buy': {'color': 'green'},
-                'predict_buy': {'color': 'blue'},
-                '%train_sell': {'color': 'red'},
-                'predict_sell': {'color': 'orange'},
+                '%train_entry': {'color': 'green'},
+                'predict_entry': {'color': 'blue'},
+                '%train_exit': {'color': 'red'},
+                'predict_exit': {'color': 'orange'},
             },
         }
     }
@@ -187,7 +187,7 @@ class Anomaly(IStrategy):
     compressor = None
     compress_data = False
 
-    # profit/loss thresholds used for assessing buy/sell signals. Keep these realistic!
+    # profit/loss thresholds used for assessing entry/exit signals. Keep these realistic!
     # Note: if self.dynamic_gain_thresholds is True, these will be adjusted for each pair, based on historical mean
     default_profit_threshold = 0.3
     default_loss_threshold = -0.3
@@ -196,14 +196,14 @@ class Anomaly(IStrategy):
     dynamic_gain_thresholds = True  # dynamically adjust gain thresholds based on actual mean (beware, training data could be bad)
 
     num_pairs = 0
-    buy_classifier = None
-    sell_classifier = None
-    buy_classifier_list = {}
-    sell_classifier_list = {}
+    entry_classifier = None
+    exit_classifier = None
+    entry_classifier_list = {}
+    exit_classifier_list = {}
 
     # debug flags
     first_time = True  # mostly for debug
-    first_run = True  # used to identify first time through buy/sell populate funcs
+    first_run = True  # used to identify first time through entry/exit populate funcs
 
     dbg_scan_classifiers = False  # if True, scan all viable classifiers and choose the best. Very slow!
     dbg_test_classifier = True  # test clasifiers after fitting
@@ -224,7 +224,7 @@ class Anomaly(IStrategy):
     ## Hyperopt Variables
 
     if use_simpler_custom_stoploss:
-        sell_params = {
+        exit_params = {
             "pHSL": -0.068,
             "pPF_1": 0.008,
             "pPF_2": 0.098,
@@ -233,42 +233,42 @@ class Anomaly(IStrategy):
         }
 
         # hard stoploss profit
-        pHSL = DecimalParameter(-0.200, -0.010, default=-0.08, decimals=3, space='sell', load=True)
+        pHSL = DecimalParameter(-0.200, -0.010, default=-0.08, decimals=3, space='exit', load=True)
 
         # profit threshold 1, trigger point, SL_1 is used
-        pPF_1 = DecimalParameter(0.008, 0.020, default=0.016, decimals=3, space='sell', load=True)
-        pSL_1 = DecimalParameter(0.008, 0.020, default=0.011, decimals=3, space='sell', load=True)
+        pPF_1 = DecimalParameter(0.008, 0.020, default=0.016, decimals=3, space='exit', load=True)
+        pSL_1 = DecimalParameter(0.008, 0.020, default=0.011, decimals=3, space='exit', load=True)
 
         # profit threshold 2, SL_2 is used
-        pPF_2 = DecimalParameter(0.040, 0.100, default=0.080, decimals=3, space='sell', load=True)
-        pSL_2 = DecimalParameter(0.020, 0.070, default=0.040, decimals=3, space='sell', load=True)
+        pPF_2 = DecimalParameter(0.040, 0.100, default=0.080, decimals=3, space='exit', load=True)
+        pSL_2 = DecimalParameter(0.020, 0.070, default=0.040, decimals=3, space='exit', load=True)
 
     else:
 
-        # Custom Sell Profit (formerly Dynamic ROI)
-        csell_roi_type = CategoricalParameter(['static', 'decay', 'step'], default='step', space='sell', load=True,
+        # Custom exit Profit (formerly Dynamic ROI)
+        cexit_roi_type = CategoricalParameter(['static', 'decay', 'step'], default='step', space='exit', load=True,
                                               optimize=True)
-        csell_roi_time = IntParameter(720, 1440, default=720, space='sell', load=True, optimize=True)
-        csell_roi_start = DecimalParameter(0.01, 0.05, default=0.01, space='sell', load=True, optimize=True)
-        csell_roi_end = DecimalParameter(0.0, 0.01, default=0, space='sell', load=True, optimize=True)
-        csell_trend_type = CategoricalParameter(['rmi', 'ssl', 'candle', 'any', 'none'], default='any', space='sell',
+        cexit_roi_time = IntParameter(720, 1440, default=720, space='exit', load=True, optimize=True)
+        cexit_roi_start = DecimalParameter(0.01, 0.05, default=0.01, space='exit', load=True, optimize=True)
+        cexit_roi_end = DecimalParameter(0.0, 0.01, default=0, space='exit', load=True, optimize=True)
+        cexit_trend_type = CategoricalParameter(['rmi', 'ssl', 'candle', 'any', 'none'], default='any', space='exit',
                                                 load=True, optimize=True)
-        csell_pullback = CategoricalParameter([True, False], default=True, space='sell', load=True, optimize=True)
-        csell_pullback_amount = DecimalParameter(0.005, 0.03, default=0.01, space='sell', load=True, optimize=True)
-        csell_pullback_respect_roi = CategoricalParameter([True, False], default=False, space='sell', load=True,
+        cexit_pullback = CategoricalParameter([True, False], default=True, space='exit', load=True, optimize=True)
+        cexit_pullback_amount = DecimalParameter(0.005, 0.03, default=0.01, space='exit', load=True, optimize=True)
+        cexit_pullback_respect_roi = CategoricalParameter([True, False], default=False, space='exit', load=True,
                                                           optimize=True)
-        csell_endtrend_respect_roi = CategoricalParameter([True, False], default=False, space='sell', load=True,
+        cexit_endtrend_respect_roi = CategoricalParameter([True, False], default=False, space='exit', load=True,
                                                           optimize=True)
 
         # Custom Stoploss
-        cstop_loss_threshold = DecimalParameter(-0.05, -0.01, default=-0.03, space='sell', load=True, optimize=True)
-        cstop_bail_how = CategoricalParameter(['roc', 'time', 'any', 'none'], default='none', space='sell', load=True,
+        cstop_loss_threshold = DecimalParameter(-0.05, -0.01, default=-0.03, space='exit', load=True, optimize=True)
+        cstop_bail_how = CategoricalParameter(['roc', 'time', 'any', 'none'], default='none', space='exit', load=True,
                                               optimize=True)
-        cstop_bail_roc = DecimalParameter(-5.0, -1.0, default=-3.0, space='sell', load=True, optimize=True)
-        cstop_bail_time = IntParameter(60, 1440, default=720, space='sell', load=True, optimize=True)
-        cstop_bail_time_trend = CategoricalParameter([True, False], default=True, space='sell', load=True,
+        cstop_bail_roc = DecimalParameter(-5.0, -1.0, default=-3.0, space='exit', load=True, optimize=True)
+        cstop_bail_time = IntParameter(60, 1440, default=720, space='exit', load=True, optimize=True)
+        cstop_bail_time_trend = CategoricalParameter([True, False], default=True, space='exit', load=True,
                                                      optimize=True)
-        cstop_max_stoploss = DecimalParameter(-0.30, -0.01, default=-0.10, space='sell', load=True, optimize=True)
+        cstop_max_stoploss = DecimalParameter(-0.30, -0.01, default=-0.10, space='exit', load=True, optimize=True)
 
     ################################
 
@@ -276,14 +276,14 @@ class Anomaly(IStrategy):
 
     # Note: try to combine current/historical data (from populate_indicators) with future data
     #       If you only use future data, the ML training is just guessing
-    #       Also, try to identify buy/sell ranges, rather than transitions - it gives the algorithms more chances
+    #       Also, try to identify entry/exit ranges, rather than transitions - it gives the algorithms more chances
     #       to find a correlation. The framework will select the first one anyway.
     #       In other words, avoid using qtpylib.crossed_above() and qtpylib.crossed_below()
     #       Proably OK not to check volume, because we are just looking for patterns
 
-    def get_train_buy_signals(self, future_df: DataFrame):
+    def get_train_entry_signals(self, future_df: DataFrame):
 
-        # print("!!! WARNING: using base class (buy) training implementation !!!")
+        # print("!!! WARNING: using base class (entry) training implementation !!!")
 
         series = np.where(
             (
@@ -296,9 +296,9 @@ class Anomaly(IStrategy):
 
         return series
 
-    def get_train_sell_signals(self, future_df: DataFrame):
+    def get_train_exit_signals(self, future_df: DataFrame):
 
-        # print("!!! WARNING: using base class (sell) training implementation !!!")
+        # print("!!! WARNING: using base class (exit) training implementation !!!")
 
         series = np.where(
             (
@@ -364,17 +364,17 @@ class Anomaly(IStrategy):
             print("    Lookahead: ", self.curr_lookahead, " candles (", self.lookahead_hours, " hours)")
 
         # create labels used for training
-        buys, sells = self.create_training_data(dataframe)
+        entries, exits = self.create_training_data(dataframe)
 
         # drop last group (because there cannot be a prediction)
         df = dataframe.iloc[:-self.curr_lookahead]
-        buys = buys.iloc[:-self.curr_lookahead]
-        sells = sells.iloc[:-self.curr_lookahead]
+        entries = entries.iloc[:-self.curr_lookahead]
+        exits = exits.iloc[:-self.curr_lookahead]
 
         # train the models on the informative data
         if self.dbg_verbose:
             print("    training models...")
-        df = self.train_models(curr_pair, df, buys, sells)
+        df = self.train_models(curr_pair, df, entries, exits)
 
         # add predictions
 
@@ -382,10 +382,10 @@ class Anomaly(IStrategy):
             print("    running predictions...")
 
         # get predictions (Note: do not modify dataframe between calls)
-        pred_buys = self.predict_buy(dataframe, curr_pair)
-        pred_sells = self.predict_sell(dataframe, curr_pair)
-        dataframe['predict_buy'] = pred_buys
-        dataframe['predict_sell'] = pred_sells
+        pred_entries = self.predict_entry(dataframe, curr_pair)
+        pred_exits = self.predict_exit(dataframe, curr_pair)
+        dataframe['predict_entry'] = pred_entries
+        dataframe['predict_exit'] = pred_exits
 
         if self.dp.runmode.value in ('plot'):
             dataframe['%recon'] = df['%recon']
@@ -397,16 +397,16 @@ class Anomaly(IStrategy):
 
         # if self.dbg_verbose:
         #     print("    saving models...")
-        # if self.buy_classifier:
-        #     self.buy_classifier.save()
-        # if self.sell_classifier:
-        #     self.sell_classifier.save()
+        # if self.entry_classifier:
+        #     self.entry_classifier.save()
+        # if self.exit_classifier:
+        #     self.exit_classifier.save()
 
         return dataframe
 
     ###################################
 
-    # add indicators used by stoploss/custom sell logic
+    # add indicators used by stoploss/custom exit logic
     def add_stoploss_indicators(self, dataframe, pair) -> DataFrame:
         if not pair in self.custom_trade_info:
             self.custom_trade_info[pair] = {}
@@ -612,7 +612,7 @@ class Anomaly(IStrategy):
         dataframe['mfi'] = ta.MFI(dataframe)
 
         # Volume Flow Indicator (MFI) for volume based on the direction of price movement
-        dataframe['vfi'] = fta.VFI(dataframe, period=14)
+        # dataframe['vfi'] = fta.VFI(dataframe, period=14)
 
         # ATR
         dataframe['atr'] = ta.ATR(dataframe, timeperiod=win_size)
@@ -693,14 +693,14 @@ class Anomaly(IStrategy):
         dataframe['dwt_nseq_up_std'] = dataframe['dwt_nseq_up'].rolling(window=win_size).std()
         dataframe['dwt_nseq_up_thresh'] = dataframe['dwt_nseq_up_mean'] + \
                                           self.n_profit_stddevs * dataframe['dwt_nseq_up_std']
-        dataframe['dwt_nseq_sell'] = np.where(dataframe['dwt_nseq_up'] > dataframe['dwt_nseq_up_thresh'], 1.0, 0.0)
+        dataframe['dwt_nseq_exit'] = np.where(dataframe['dwt_nseq_up'] > dataframe['dwt_nseq_up_thresh'], 1.0, 0.0)
 
         dataframe['dwt_nseq_dn'] = dataframe['dwt_nseq'].clip(upper=0.0)
         dataframe['dwt_nseq_dn_mean'] = dataframe['dwt_nseq_dn'].rolling(window=win_size).mean()
         dataframe['dwt_nseq_dn_std'] = dataframe['dwt_nseq_dn'].rolling(window=win_size).std()
         dataframe['dwt_nseq_dn_thresh'] = dataframe['dwt_nseq_dn_mean'] - self.n_loss_stddevs * dataframe[
             'dwt_nseq_dn_std']
-        dataframe['dwt_nseq_buy'] = np.where(dataframe['dwt_nseq_dn'] < dataframe['dwt_nseq_dn_thresh'], 1.0, 0.0)
+        dataframe['dwt_nseq_entry'] = np.where(dataframe['dwt_nseq_dn'] < dataframe['dwt_nseq_dn_thresh'], 1.0, 0.0)
 
         # Recent min/max
         dataframe['dwt_recent_min'] = dataframe['dwt_smooth'].rolling(window=win_size).min()
@@ -780,8 +780,8 @@ class Anomaly(IStrategy):
         future_df['profit_diff'] = (future_df['future_profit'] - future_df['profit_threshold']) * 10.0
         future_df['loss_diff'] = (future_df['future_loss'] - future_df['loss_threshold']) * 10.0
 
-        # future_df['buy_signal'] = np.where(future_df['profit_diff'] > 0.0, 1.0, 0.0)
-        # future_df['sell_signal'] = np.where(future_df['loss_diff'] < 0.0, -1.0, 0.0)
+        # future_df['entry_signal'] = np.where(future_df['profit_diff'] > 0.0, 1.0, 0.0)
+        # future_df['exit_signal'] = np.where(future_df['loss_diff'] < 0.0, -1.0, 0.0)
 
         # these explicitly uses dwt
         future_df['future_dwt'] = future_df['full_dwt'].shift(-lookahead)
@@ -859,30 +859,30 @@ class Anomaly(IStrategy):
 
     ################################
 
-    # creates the buy/sell labels absed on looking ahead into the supplied dataframe
+    # creates the entry/exit labels based on looking ahead into the supplied dataframe
     def create_training_data(self, dataframe: DataFrame):
 
         future_df = self.add_future_data(dataframe.copy())
 
-        future_df['train_buy'] = 0.0
-        future_df['train_sell'] = 0.0
+        future_df['train_entry'] = 0.0
+        future_df['train_exit'] = 0.0
 
         # use sequence trends as criteria
-        future_df['train_buy'] = self.get_train_buy_signals(future_df)
-        future_df['train_sell'] = self.get_train_sell_signals(future_df)
+        future_df['train_entry'] = self.get_train_entry_signals(future_df)
+        future_df['train_exit'] = self.get_train_exit_signals(future_df)
 
-        buys = future_df['train_buy'].copy()
-        if buys.sum() < 3:
-            print("OOPS! <3 ({:.0f}) buy signals generated. Check training criteria".format(buys.sum()))
+        entries = future_df['train_entry'].copy()
+        if entries.sum() < 3:
+            print("OOPS! <3 ({:.0f}) entry signals generated. Check training criteria".format(entries.sum()))
 
-        sells = future_df['train_sell'].copy()
-        if buys.sum() < 3:
-            print("OOPS! <3 ({:.0f}) sell signals generated. Check training criteria".format(sells.sum()))
+        exits = future_df['train_exit'].copy()
+        if entries.sum() < 3:
+            print("OOPS! <3 ({:.0f}) exit signals generated. Check training criteria".format(exits.sum()))
 
         self.save_debug_data(future_df)
         self.save_debug_indicators(future_df)
 
-        return buys, sells
+        return entries, exits
 
     def save_debug_data(self, future_df: DataFrame):
 
@@ -891,7 +891,7 @@ class Anomaly(IStrategy):
         # the func save_debug_indicators()
 
         dbg_list = [
-            'full_dwt', 'train_buy', 'train_sell',
+            'full_dwt', 'train_entry', 'train_exit',
             'future_gain', 'future_min', 'future_max',
             'profit_min', 'profit_max', 'profit_threshold',
             'loss_min', 'loss_max', 'loss_threshold',
@@ -1010,7 +1010,7 @@ class Anomaly(IStrategy):
                 print("WARNING: self.compress_data should be False")
             clf = CompressionAutoEncoder(nfeatures, tag=tag)
         elif clf_type == 1:
-            clf = AnomalyDetector_AEnc("BuyAnomalyDetector", nfeatures, tag=tag)
+            clf = AnomalyDetector_AEnc("EntryAnomalyDetector", nfeatures, tag=tag)
         elif clf_type == 2:
             clf = AnomalyDetector_LOF()
         elif clf_type == 3:
@@ -1115,24 +1115,24 @@ class Anomaly(IStrategy):
         return a1, a2
 
     # remove outliers from normalised dataframe
-    def remove_outliers(self, df_norm: DataFrame, buys, sells):
+    def remove_outliers(self, df_norm: DataFrame, entries, exits):
 
         # for col in df_norm.columns.values:
         #     if col != 'date':
         #         df_norm = df_norm[(df_norm[col] <= 3.0)]
         # return df_norm
         df = df_norm.copy()
-        df['%temp_buy'] = buys.copy()
-        df['%temp_sell'] = sells.copy()
+        df['%temp_entry'] = entries.copy()
+        df['%temp_exit'] = exits.copy()
         #
         df2 = df[((df >= -3.0) & (df <= 3.0)).all(axis=1)]
         # df_out = df[~((df >= -3.0) & (df <= 3.0)).all(axis=1)] # for debug
         ndrop = df_norm.shape[0] - df2.shape[0]
         if ndrop > 0:
-            b = df2['%temp_buy'].copy()
-            s = df2['%temp_sell'].copy()
-            df2.drop('%temp_buy', axis=1, inplace=True)
-            df2.drop('%temp_sell', axis=1, inplace=True)
+            b = df2['%temp_entry'].copy()
+            s = df2['%temp_exit'].copy()
+            df2.drop('%temp_entry', axis=1, inplace=True)
+            df2.drop('%temp_exit', axis=1, inplace=True)
             df2.reindex()
             # if self.dbg_verbose:
             print("    Removed ", ndrop, " outliers")
@@ -1142,85 +1142,85 @@ class Anomaly(IStrategy):
         else:
             # no outliers, just return originals
             df2 = df_norm
-            b = buys
-            s = sells
+            b = entries
+            s = exits
         return df2, b, s
 
     # build a 'viable' dataframe sample set. Needed because the positive labels are sparse
-    def build_viable_dataset(self, size: int, df_norm: DataFrame, buys, sells):
+    def build_viable_dataset(self, size: int, df_norm: DataFrame, entries, exits):
         # if self.dbg_verbose:
-        #     print("     df_norm:{} size:{} buys:{} sells:{}".format(df_norm.shape, size, buys.shape[0], sells.shape[0]))
+        #     print("     df_norm:{} size:{} entries:{} exits:{}".format(df_norm.shape, size, entries.shape[0], exits.shape[0]))
 
         # copy and combine the data into one dataframe
         df = df_norm.copy()
-        df['%temp_buy'] = buys.copy()
-        df['%temp_sell'] = sells.copy()
+        df['%temp_entry'] = entries.copy()
+        df['%temp_exit'] = exits.copy()
 
-        # df_buy = df[( (df['%temp_buy'] > 0) ).all(axis=1)]
-        # df_sell = df[((df['%temp_sell'] > 0)).all(axis=1)]
-        # df_nosig = df[((df['%temp_buy'] == 0) & (df['%temp_sell'] == 0)).all(axis=1)]
+        # df_entry = df[( (df['%temp_entry'] > 0) ).all(axis=1)]
+        # df_exit = df[((df['%temp_exit'] > 0)).all(axis=1)]
+        # df_nosig = df[((df['%temp_entry'] == 0) & (df['%temp_exit'] == 0)).all(axis=1)]
 
-        df_buy = df.loc[df['%temp_buy'] == 1]
-        df_sell = df.loc[df['%temp_sell'] == 1]
-        df_nosig = df.loc[(df['%temp_buy'] == 0) & (df['%temp_sell'] == 0)]
+        df_entry = df.loc[df['%temp_entry'] == 1]
+        df_exit = df.loc[df['%temp_exit'] == 1]
+        df_nosig = df.loc[(df['%temp_entry'] == 0) & (df['%temp_exit'] == 0)]
 
-        # make sure there aren't too many buys & sells
-        # We are aiming for a roughly even split between buys, sells, and 'no signal' (no buy or sell)
+        # make sure there aren't too many entries & exits
+        # We are aiming for a roughly even split between entries, exits, and 'no signal' (no entry or exit)
         max_signals = int(2 * size / 3)
-        buy_train_size = df_buy.shape[0]
-        sell_train_size = df_sell.shape[0]
+        entry_train_size = df_entry.shape[0]
+        exit_train_size = df_exit.shape[0]
 
         if max_signals > df_nosig.shape[0]:
             max_signals = int((size - df_nosig.shape[0])) - 1
 
-        if ((df_buy.shape[0] + df_sell.shape[0]) > max_signals):
+        if ((df_entry.shape[0] + df_exit.shape[0]) > max_signals):
             # both exceed max?
             sig_size = int(max_signals / 2)
             # if self.dbg_verbose:
-            #     print("     sig_size:{} max_signals:{} buys:{} sells:{}".format(sig_size, max_signals, df_buy.shape[0],
-            #                                                                     df_sell.shape[0]))
+            #     print("     sig_size:{} max_signals:{} entries:{} exits:{}".format(sig_size, max_signals, df_entry.shape[0],
+            #                                                                     df_exit.shape[0]))
 
-            if (df_buy.shape[0] > sig_size) & (df_sell.shape[0] > sig_size):
-                # resize both buy & sell to 1/3 of requested size
-                buy_train_size = sig_size
-                sell_train_size = sig_size
+            if (df_entry.shape[0] > sig_size) & (df_exit.shape[0] > sig_size):
+                # resize both entry & exit to 1/3 of requested size
+                entry_train_size = sig_size
+                exit_train_size = sig_size
             else:
                 # only one them is too big, so figure out which
-                if (df_buy.shape[0] > df_sell.shape[0]):
-                    buy_train_size = max_signals - df_sell.shape[0]
+                if (df_entry.shape[0] > df_exit.shape[0]):
+                    entry_train_size = max_signals - df_exit.shape[0]
                 else:
-                    sell_train_size = max_signals - df_buy.shape[0]
+                    exit_train_size = max_signals - df_entry.shape[0]
 
             # if self.dbg_verbose:
-            #     print("     buy_train_size:{} sell_train_size:{}".format(buy_train_size, sell_train_size))
+            #     print("     entry_train_size:{} exit_train_size:{}".format(entry_train_size, exit_train_size))
 
-        if buy_train_size < df_buy.shape[0]:
-            df_buy, _ = train_test_split(df_buy, train_size=buy_train_size, shuffle=False)
-        if sell_train_size < df_sell.shape[0]:
-            df_sell, _ = train_test_split(df_sell, train_size=sell_train_size, shuffle=False)
+        if entry_train_size < df_entry.shape[0]:
+            df_entry, _ = train_test_split(df_entry, train_size=entry_train_size, shuffle=False)
+        if exit_train_size < df_exit.shape[0]:
+            df_exit, _ = train_test_split(df_exit, train_size=exit_train_size, shuffle=False)
 
         # extract enough rows to fill the requested size
-        fill_size = size - buy_train_size - sell_train_size - 1
+        fill_size = size - entry_train_size - exit_train_size - 1
         # if self.dbg_verbose:
         #     print("     df_nosig:{} fill_size:{}".format(df_nosig.shape, fill_size))
 
         if fill_size < df_nosig.shape[0]:
             df_nosig, _ = train_test_split(df_nosig, train_size=fill_size, shuffle=False)
 
-        # print("viable df - buys:{} sells:{} fill:{}".format(df_buy.shape[0], df_sell.shape[0], df_nosig.shape[0]))
+        # print("viable df - entries:{} exits:{} fill:{}".format(df_entry.shape[0], df_exit.shape[0], df_nosig.shape[0]))
 
         # concatenate the dataframes
-        frames = [df_buy, df_sell, df_nosig]
+        frames = [df_entry, df_exit, df_nosig]
         df2 = pd.concat(frames)
 
         # # shuffle rows
         # df2 = df2.sample(frac=1)
 
-        # separate out the data, buys & sells
-        b = df2['%temp_buy'].copy()
-        s = df2['%temp_sell'].copy()
-        df2.drop('%temp_buy', axis=1, inplace=True)
-        df2.drop('%temp_sell', axis=1, inplace=True)
+        # separate out the data, entries & exits
+        b = df2['%temp_entry'].copy()
+        s = df2['%temp_exit'].copy()
+        df2.drop('%temp_entry', axis=1, inplace=True)
+        df2.drop('%temp_exit', axis=1, inplace=True)
         df2.reindex()
 
         if self.dbg_verbose:
@@ -1238,16 +1238,16 @@ class Anomaly(IStrategy):
 
     # train the PCA reduction and classification models
 
-    def train_models(self, curr_pair, dataframe: DataFrame, buys, sells) -> DataFrame:
+    def train_models(self, curr_pair, dataframe: DataFrame, entries, exits) -> DataFrame:
 
         # check input - need at least 2 samples or classifiers will not train
-        if buys.sum() < 2:
-            print("*** ERR: insufficient buys in expected results. Check training data")
-            # print(buys)
+        if entries.sum() < 2:
+            print("*** ERR: insufficient entries in expected results. Check training data")
+            # print(entries)
             return
 
-        if sells.sum() < 2:
-            print("*** ERR: insufficient sells in expected results. Check training data")
+        if exits.sum() < 2:
+            print("*** ERR: insufficient exits in expected results. Check training data")
             return
 
         rand_st = 27  # use fixed number for reproducibility
@@ -1269,71 +1269,71 @@ class Anomaly(IStrategy):
         train_size = int(train_ratio * data_size)
         test_size = data_size - train_size
 
-        # df_train, df_test, train_buys, test_buys, train_sells, test_sells, = train_test_split(full_df_norm,
-        #                                                                                       buys,
-        #                                                                                       sells,
+        # df_train, df_test, train_entries, test_entries, train_exits, test_exits, = train_test_split(full_df_norm,
+        #                                                                                       entries,
+        #                                                                                       exits,
         #                                                                                       train_size=train_size,
         #                                                                                       random_state=rand_st,
         #                                                                                       shuffle=False)
         # use the back portion of data for training, front for testing
         df_test, df_train = self.split_dataframe(full_df_norm, (1.0 - train_ratio))
-        test_buys, train_buys = self.split_array(buys, (1.0 - train_ratio))
-        test_sells, train_sells = self.split_array(sells, (1.0 - train_ratio))
+        test_entries, train_entries = self.split_array(entries, (1.0 - train_ratio))
+        test_exits, train_exits = self.split_array(exits, (1.0 - train_ratio))
 
         if self.dbg_verbose:
             print("     dataframe:", full_df_norm.shape, ' -> train:', df_train.shape, " + test:", df_test.shape)
-            print("     buys:", buys.shape, ' -> train:', train_buys.shape, " + test:", test_buys.shape)
-            print("     sells:", sells.shape, ' -> train:', train_sells.shape, " + test:", test_sells.shape)
+            print("     entries:", entries.shape, ' -> train:', train_entries.shape, " + test:", test_entries.shape)
+            print("     exits:", exits.shape, ' -> train:', train_exits.shape, " + test:", test_exits.shape)
 
-        print("    #training samples:", len(df_train), " #buys:", int(train_buys.sum()), ' #sells:',
-              int(train_sells.sum()))
+        print("    #training samples:", len(df_train), " #entries:", int(train_entries.sum()), ' #exits:',
+              int(train_exits.sum()))
 
-        train_buy_labels = self.get_binary_labels(train_buys)
-        train_sell_labels = self.get_binary_labels(train_sells)
-        test_buy_labels = self.get_binary_labels(test_buys)
-        test_sell_labels = self.get_binary_labels(test_sells)
+        train_entry_labels = self.get_binary_labels(train_entries)
+        train_exit_labels = self.get_binary_labels(train_exits)
+        test_entry_labels = self.get_binary_labels(test_entries)
+        test_exit_labels = self.get_binary_labels(test_exits)
 
-        # Buy Classifier
+        # entry Classifier
 
         # # create classifiers, if necessary
 
-        if self.curr_pair not in self.buy_classifier_list:
-            self.buy_classifier = self.get_classifier(full_df_norm.shape[1], "Buy")
-            self.buy_classifier_list[self.curr_pair] = self.buy_classifier
+        if self.curr_pair not in self.entry_classifier_list:
+            self.entry_classifier = self.get_classifier(full_df_norm.shape[1], "entry")
+            self.entry_classifier_list[self.curr_pair] = self.entry_classifier
         else:
-            self.buy_classifier = self.buy_classifier_list[self.curr_pair]
+            self.entry_classifier = self.entry_classifier_list[self.curr_pair]
 
         # if self.dp.runmode.value not in ('plot'):
         # train/fit the classifiers (note, this is cumulative)
         force_train = True if (self.dp.runmode.value in ('backtest')) else False
 
-        self.buy_classifier.train(df_train, df_test, train_buys, test_buys, force_train=force_train)
+        self.entry_classifier.train(df_train, df_test, train_entries, test_entries, force_train=force_train)
 
-        # Sell Classifier
+        # exit Classifier
 
-        if self.curr_pair not in self.sell_classifier_list:
-            self.sell_classifier = self.get_classifier(full_df_norm.shape[1], "Sell")
-            self.sell_classifier_list[self.curr_pair] = self.sell_classifier
+        if self.curr_pair not in self.exit_classifier_list:
+            self.exit_classifier = self.get_classifier(full_df_norm.shape[1], "exit")
+            self.exit_classifier_list[self.curr_pair] = self.exit_classifier
         else:
-            self.sell_classifier = self.sell_classifier_list[self.curr_pair]
+            self.exit_classifier = self.exit_classifier_list[self.curr_pair]
 
-        self.sell_classifier.train(df_train, df_test, train_sells, test_sells, force_train=force_train)
+        self.exit_classifier.train(df_train, df_test, train_exits, test_exits, force_train=force_train)
 
         # if scan specified, test against the test dataframe
         if self.dbg_test_classifier:
 
-            if not (self.buy_classifier is None):
-                pred_buys = self.buy_classifier.predict(df_test)
+            if not (self.entry_classifier is None):
+                pred_entries = self.entry_classifier.predict(df_test)
                 print("")
-                print("Testing - Buy Signals (", type(self.buy_classifier).__name__, ")")
-                print(classification_report(test_buy_labels, pred_buys))
+                print("Testing - entry Signals (", type(self.entry_classifier).__name__, ")")
+                print(classification_report(test_entry_labels, pred_entries))
                 print("")
 
-            if not (self.sell_classifier is None):
-                pred_sells = self.sell_classifier.predict(df_test)
+            if not (self.exit_classifier is None):
+                pred_exits = self.exit_classifier.predict(df_test)
                 print("")
-                print("Testing - Sell Signals (", type(self.sell_classifier).__name__, ")")
-                print(classification_report(test_sell_labels, pred_sells))
+                print("Testing - exit Signals (", type(self.exit_classifier).__name__, ")")
+                print(classification_report(test_exit_labels, pred_exits))
                 print("")
 
         # if running 'plot', reconstruct the original dataframe for display
@@ -1341,7 +1341,7 @@ class Anomaly(IStrategy):
             if self.compress_data:
                 df_norm = self.norm_dataframe(dataframe)  # this also resets the scaler
                 df_compressed = self.compress_dataframe(df_norm)
-                df_recon_compressed = self.buy_classifier.reconstruct(df_compressed)
+                df_recon_compressed = self.entry_classifier.reconstruct(df_compressed)
                 df_recon_norm = self.compressor.inverse_transform(df_recon_compressed)
                 df_recon_norm = pd.DataFrame(df_recon_norm, columns=df_norm.columns)
                 df_recon = self.denorm_dataframe(df_recon_norm)
@@ -1349,20 +1349,20 @@ class Anomaly(IStrategy):
             else:
                 # debug: get reconstructed dataframe and save 'close' as a comparison
                 tmp = self.norm_dataframe(dataframe)  # this just resets the scaler
-                df_recon_norm = self.buy_classifier.reconstruct(tmp)
+                df_recon_norm = self.entry_classifier.reconstruct(tmp)
                 df_recon = self.denorm_dataframe(df_recon_norm)
                 dataframe['%recon'] = df_recon['close']
         return dataframe
 
-    # remove any rows thatr are buys or sells from training data (needed by some classifiers)
-    def clean_training_data(self, df_train, train_buys, train_sells) -> DataFrame:
+    # remove any rows that are entries or exits from training data (needed by some classifiers)
+    def clean_training_data(self, df_train, train_entries, train_exits) -> DataFrame:
 
         # print("    removing anomalies from training data")
         df = df_train.copy()
-        df['%buys'] = train_buys
-        df['%sells'] = train_sells
-        df = df[((df['%buys'] < 1.0) & (df['%sells'] < 1.0))]
-        df = df.drop(['%buys', '%sells'], axis=1)
+        df['%entries'] = train_entries
+        df['%exits'] = train_exits
+        df = df[((df['%entries'] < 1.0) & (df['%exits'] < 1.0))]
+        df = df.drop(['%entries', '%exits'], axis=1)
 
         return df
 
@@ -1435,7 +1435,7 @@ class Anomaly(IStrategy):
         elif compressor_type == 3:
             # a bit slow, still debugging...
             print("    Using Autoencoder...")
-            compressor = CompressionAutoEncoder(df_norm.shape[1], tag="Buy")
+            compressor = CompressionAutoEncoder(df_norm.shape[1], tag="entry")
 
         else:
             print("*** ERR - unknown PCA type ***")
@@ -1462,29 +1462,29 @@ class Anomaly(IStrategy):
         # print (predict)
         return predict
 
-    def predict_buy(self, df: DataFrame, pair):
-        clf = self.buy_classifier
+    def predict_entry(self, df: DataFrame, pair):
+        clf = self.entry_classifier
 
         if clf is None:
-            print("    No Buy Classifier for pair ", pair, " -Skipping predictions")
+            print("    No entry Classifier for pair ", pair, " -Skipping predictions")
             predict = df['close'].copy()  # just to get the size
             predict = 0.0
             return predict
 
-        print("    predicting buys...")
+        print("    predicting entries...")
         predict = self.predict(df, pair, clf)
 
         return predict
 
-    def predict_sell(self, df: DataFrame, pair):
-        clf = self.sell_classifier
+    def predict_exit(self, df: DataFrame, pair):
+        clf = self.exit_classifier
         if clf is None:
-            print("    No Sell Classifier for pair ", pair, " -Skipping predictions")
+            print("    No exit Classifier for pair ", pair, " -Skipping predictions")
             predict = df['close']  # just to get the size
             predict = 0.0
             return predict
 
-        print("    predicting sells...")
+        print("    predicting exits...")
         predict = self.predict(df, pair, clf)
 
         return predict
@@ -1515,10 +1515,10 @@ class Anomaly(IStrategy):
     ###################################
 
     """
-    Buy Signal
+    entry Signal
     """
 
-    def populate_buy_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
+    def populate_entry_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
         conditions = []
         dataframe.loc[:, 'enter_tag'] = ''
         curr_pair = metadata['pair']
@@ -1533,7 +1533,7 @@ class Anomaly(IStrategy):
 
         # add some fairly loose guards, to help prevent 'bad' predictions
 
-        # # ATR in buy range
+        # # ATR in entry range
         # conditions.append(dataframe['atr_signal'] > 0.0)
 
         # some trading volume
@@ -1550,7 +1550,7 @@ class Anomaly(IStrategy):
 
         # PCA/Classifier triggers
         anomaly_cond = (
-            (qtpylib.crossed_above(dataframe['predict_buy'], 0.5))
+            (qtpylib.crossed_above(dataframe['predict_entry'], 0.5))
         )
         conditions.append(anomaly_cond)
 
@@ -1567,10 +1567,10 @@ class Anomaly(IStrategy):
     ###################################
 
     """
-    Sell Signal
+    exit Signal
     """
 
-    def populate_sell_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
+    def populate_exit_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
         conditions = []
         dataframe.loc[:, 'exit_tag'] = ''
         curr_pair = metadata['pair']
@@ -1585,7 +1585,7 @@ class Anomaly(IStrategy):
 
         conditions.append(dataframe['volume'] > 0)
 
-        # # ATR in sell range
+        # # ATR in exit range
         # conditions.append(dataframe['atr_signal'] <= 0.0)
 
         # above Bollinger mid-point
@@ -1599,7 +1599,7 @@ class Anomaly(IStrategy):
 
         # PCA triggers
         anomaly_cond = (
-            qtpylib.crossed_above(dataframe['predict_sell'], 0.5)
+            qtpylib.crossed_above(dataframe['predict_exit'], 0.5)
         )
 
         conditions.append(anomaly_cond)
@@ -1641,7 +1641,7 @@ class Anomaly(IStrategy):
         if current_profit < self.cstop_max_stoploss.value:
             return 0.01
 
-        # Determine how we sell when we are in a loss
+        # Determine how we exit when we are in a loss
         if current_profit < self.cstop_loss_threshold.value:
             if self.cstop_bail_how.value == 'roc' or self.cstop_bail_how.value == 'any':
                 # Dynamic bailout based on rate of change
@@ -1696,17 +1696,17 @@ class Anomaly(IStrategy):
     ###################################
 
     """
-    Custom Sell
+    Custom exit
     """
 
-    def custom_sell(self, pair: str, trade: 'Trade', current_time: 'datetime', current_rate: float,
+    def custom_exit(self, pair: str, trade: 'Trade', current_time: 'datetime', current_rate: float,
                     current_profit: float, **kwargs):
         if self.use_simpler_custom_stoploss:
-            return self.simpler_custom_sell(pair, trade, current_time, current_rate, current_profit)
+            return self.simpler_custom_exit(pair, trade, current_time, current_rate, current_profit)
         else:
-            return self.complex_custom_sell(pair, trade, current_time, current_rate, current_profit)
+            return self.complex_custom_exit(pair, trade, current_time, current_rate, current_profit)
 
-    def complex_custom_sell(self, pair: str, trade: 'Trade', current_time: 'datetime', current_rate: float,
+    def complex_custom_exit(self, pair: str, trade: 'Trade', current_time: 'datetime', current_rate: float,
                             current_profit: float):
 
         dataframe, _ = self.dp.get_analyzed_dataframe(pair=pair, timeframe=self.timeframe)
@@ -1714,51 +1714,51 @@ class Anomaly(IStrategy):
 
         trade_dur = int((current_time.timestamp() - trade.open_date_utc.timestamp()) // 60)
         max_profit = max(0, trade.calc_profit_ratio(trade.max_rate))
-        pullback_value = max(0, (max_profit - self.csell_pullback_amount.value))
+        pullback_value = max(0, (max_profit - self.cexit_pullback_amount.value))
         in_trend = False
 
         # Mod: just take the profit:
-        # Above 3%, sell if MFA > 90
+        # Above 3%, exit if MFA > 90
         if current_profit > 0.03:
             if last_candle['mfi'] > 90:
                 return 'mfi_90'
 
-        # Sell any positions at a loss if they are held for more than one day.
+        # exit any positions at a loss if they are held for more than one day.
         if current_profit < 0.0 and (current_time - trade.open_date_utc).days >= 2:
             return 'unclog'
 
         # Determine our current ROI point based on the defined type
-        if self.csell_roi_type.value == 'static':
-            min_roi = self.csell_roi_start.value
-        elif self.csell_roi_type.value == 'decay':
-            min_roi = cta.linear_decay(self.csell_roi_start.value, self.csell_roi_end.value, 0,
-                                       self.csell_roi_time.value, trade_dur)
-        elif self.csell_roi_type.value == 'step':
-            if trade_dur < self.csell_roi_time.value:
-                min_roi = self.csell_roi_start.value
+        if self.cexit_roi_type.value == 'static':
+            min_roi = self.cexit_roi_start.value
+        elif self.cexit_roi_type.value == 'decay':
+            min_roi = cta.linear_decay(self.cexit_roi_start.value, self.cexit_roi_end.value, 0,
+                                       self.cexit_roi_time.value, trade_dur)
+        elif self.cexit_roi_type.value == 'step':
+            if trade_dur < self.cexit_roi_time.value:
+                min_roi = self.cexit_roi_start.value
             else:
-                min_roi = self.csell_roi_end.value
+                min_roi = self.cexit_roi_end.value
 
         # Determine if there is a trend
-        if self.csell_trend_type.value == 'rmi' or self.csell_trend_type.value == 'any':
+        if self.cexit_trend_type.value == 'rmi' or self.cexit_trend_type.value == 'any':
             if last_candle['rmi_up_trend'] == 1:
                 in_trend = True
-        if self.csell_trend_type.value == 'ssl' or self.csell_trend_type.value == 'any':
+        if self.cexit_trend_type.value == 'ssl' or self.cexit_trend_type.value == 'any':
             if last_candle['ssl_dir'] == 1:
                 in_trend = True
-        if self.csell_trend_type.value == 'candle' or self.csell_trend_type.value == 'any':
+        if self.cexit_trend_type.value == 'candle' or self.cexit_trend_type.value == 'any':
             if last_candle['candle_up_trend'] == 1:
                 in_trend = True
 
-        # Don't sell if we are in a trend unless the pullback threshold is met
+        # Don't exit if we are in a trend unless the pullback threshold is met
         if in_trend == True and current_profit > 0:
-            # Record that we were in a trend for this trade/pair for a more useful sell message later
+            # Record that we were in a trend for this trade/pair for a more useful exit message later
             self.custom_trade_info[trade.pair]['had_trend'] = True
-            # If pullback is enabled and profit has pulled back allow a sell, maybe
-            if self.csell_pullback.value == True and (current_profit <= pullback_value):
-                if self.csell_pullback_respect_roi.value == True and current_profit > min_roi:
+            # If pullback is enabled and profit has pulled back allow a exit, maybe
+            if self.cexit_pullback.value == True and (current_profit <= pullback_value):
+                if self.cexit_pullback_respect_roi.value == True and current_profit > min_roi:
                     return 'intrend_pullback_roi'
-                elif self.csell_pullback_respect_roi.value == False:
+                elif self.cexit_pullback_respect_roi.value == False:
                     if current_profit > min_roi:
                         return 'intrend_pullback_roi'
                     else:
@@ -1771,7 +1771,7 @@ class Anomaly(IStrategy):
                 if current_profit > min_roi:
                     self.custom_trade_info[trade.pair]['had_trend'] = False
                     return 'trend_roi'
-                elif self.csell_endtrend_respect_roi.value == False:
+                elif self.cexit_endtrend_respect_roi.value == False:
                     self.custom_trade_info[trade.pair]['had_trend'] = False
                     return 'trend_noroi'
             elif current_profit > min_roi:
@@ -1779,21 +1779,21 @@ class Anomaly(IStrategy):
         else:
             return None
 
-    def simpler_custom_sell(self, pair: str, trade: 'Trade', current_time: 'datetime', current_rate: float,
+    def simpler_custom_exit(self, pair: str, trade: 'Trade', current_time: 'datetime', current_rate: float,
                             current_profit: float):
         dataframe, _ = self.dp.get_analyzed_dataframe(pair=pair, timeframe=self.timeframe)
         last_candle = dataframe.iloc[-1].squeeze()
 
-        # Above 5% profit, sell
+        # Above 5% profit, exit
         if current_profit > 0.05:
             return 'profit_5'
 
-        # Above 2%, sell if MFA > 90
+        # Above 2%, exit if MFA > 90
         if current_profit > 0.02:
             if last_candle['mfi'] > 90:
                 return 'mfi_90'
 
-        # Sell any positions at a loss if they are held for more than one day.
+        # exit any positions at a loss if they are held for more than one day.
         if current_profit < 0.0 and (current_time - trade.open_date_utc).days >= 2:
             return 'unclog'
 
