@@ -40,7 +40,7 @@ log = logging.getLogger(__name__)
 warnings.simplefilter(action='ignore', category=pd.errors.PerformanceWarning)
 
 import custom_indicators as cta
-from finta import TA as fta
+import finta as fta
 
 from sklearn.model_selection import RandomizedSearchCV, train_test_split
 from sklearn.metrics import classification_report
