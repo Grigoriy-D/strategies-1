@@ -39,7 +39,7 @@ import scipy
 
 """
 ####################################################################################
-DWT_short - use a Discreet Wavelet Transform (DWT) to estimate future price movements
+FBB_DWT_short - use a Discreet Wavelet Transform (DWT) to estimate future price movements
             This version enters short positions (not long)
 
 ####################################################################################
@@ -55,7 +55,7 @@ class DWT_short(IStrategy):
     }
 
     # Stoploss:
-    stoploss = -0.05
+    stoploss = -0.1
 
     # Trailing stop:
     trailing_stop = False
@@ -91,14 +91,14 @@ class DWT_short(IStrategy):
     ## Hyperopt Variables
 
     # FBB_ hyperparams
-    buy_bb_gain = DecimalParameter(0.01, 0.50, decimals=2, default=0.09, space='buy', load=True, optimize=True)
-    buy_fisher_wr = DecimalParameter(-0.99, -0.75, decimals=2, default=-0.75, space='buy', load=True, optimize=True)
-    buy_force_fisher_wr = DecimalParameter(-0.99, -0.85, decimals=2, default=-0.99, space='buy', load=True, optimize=True)
+    exit_short_bb_gain = DecimalParameter(0.01, 0.50, decimals=2, default=0.09, space='buy', load=True, optimize=True)
+    exit_short_fisher_wr = DecimalParameter(-0.99, -0.75, decimals=2, default=-0.75, space='buy', load=True, optimize=True)
+    exit_short_force_fisher_wr = DecimalParameter(-0.99, -0.85, decimals=2, default=-0.99, space='buy', load=True, optimize=True)
 
-    sell_bb_gain = DecimalParameter(0.7, 1.5, decimals=2, default=0.8, space='sell', load=True, optimize=True)
-    sell_fisher_wr = DecimalParameter(0.75, 0.99, decimals=2, default=0.9, space='sell', load=True, optimize=True)
-    sell_force_fisher_wr = DecimalParameter(0.85, 0.99, decimals=2, default=0.99, space='sell', load=True, optimize=True)
-
+    entry_short_bb_gain = DecimalParameter(0.7, 1.5, decimals=2, default=0.8, space='sell', load=True, optimize=True)
+    entry_short_fisher_wr = DecimalParameter(0.75, 0.99, decimals=2, default=0.9, space='sell', load=True, optimize=True)
+    entry_short_force_fisher_wr = DecimalParameter(0.85, 0.99, decimals=2, default=0.99, space='sell', load=True, optimize=True)
+    
     dwt_window = startup_candle_count
 
     # DWT  hyperparams
@@ -443,11 +443,12 @@ class DWT_short(IStrategy):
         
         # FBB triggers (convert FBB buy triggers to FBB short)
         short_fbb_cond = (
-                dataframe('fisher_wr') <=self.exit_short_fisher_wr.value)&(dataframe('bb_gain') >= self.exit_short_bb_gain.value)
+                (dataframe('fisher_wr') <=self.exit_short_fisher_wr.value)&
+                (dataframe('bb_gain') >= self.exit_short_bb_gain.value))
         
         short_conditions.append(short_fbb_cond)
         
-        dataframe.loc(short_fbb_cond, 'exit_tag') += 'short_fbb_exit '
+        dataframe.loc(short_fbb_cond, 'exit_tag') == 'short_fbb_exit '
  
         if short_conditions:
             dataframe.loc[reduce(lambda x, y: x & y, short_conditions), 'exit_short'] = 1

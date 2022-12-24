@@ -40,9 +40,10 @@ import scipy
 
 """
 ####################################################################################
-DWT_LongShort - use a Discreet Wavelet Transform (DWT) to estimate future price movements
+FBB_DWT_LongShort - use a Discreet Wavelet Transform (DWT) to estimate future price movements
             This strategy will enter both long and short positions, and has custom sell
-            logic for each
+            logic for each. The DWT is good at detecting swings, while the FBB checks are to try and keep
+            trades within oversold/overbought regions
 
 ####################################################################################
 """
@@ -60,7 +61,7 @@ class FBB_DWT_LongShort(IStrategy):
     }
 
     # Stoploss:
-    stoploss = -0.05
+    stoploss = -0.10
 
     # Trailing stop:
     trailing_stop = False
