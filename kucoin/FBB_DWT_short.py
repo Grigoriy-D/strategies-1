@@ -46,7 +46,7 @@ FBB_DWT_short - use a Discreet Wavelet Transform (DWT) to estimate future price 
 """
 
 
-class DWT_short(IStrategy):
+class FBB_DWT_short(IStrategy):
     # Do *not* hyperopt for the roi and stoploss spaces
 
     # ROI table:
