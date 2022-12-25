@@ -109,7 +109,7 @@ class PCA_dwt(PCA):
     curr_pair = ""
     custom_trade_info = {}
 
-    # profit/loss thresholds used for assessing buy/sell signals. Keep these realistic!
+    # profit/loss thresholds used for assessing entry/exit signals. Keep these realistic!
     # Note: if self.dynamic_gain_thresholds is True, these will be adjusted for each pair, based on historical mean
     default_profit_threshold = 0.3
     default_loss_threshold = -0.3
@@ -124,7 +124,7 @@ class PCA_dwt(PCA):
 
     # debug flags
     first_time = True  # mostly for debug
-    first_run = True  # used to identify first time through buy/sell populate funcs
+    first_run = True  # used to identify first time through entry/exit populate funcs
 
     dbg_scan_classifiers = True  # if True, scan all viable classifiers and choose the best. Very slow!
     dbg_test_classifier = True  # test clasifiers after fitting
@@ -139,33 +139,33 @@ class PCA_dwt(PCA):
     ## Hyperopt Variables
 
     # PCA hyperparams
-    # buy_pca_gain = IntParameter(1, 50, default=4, space='buy', load=True, optimize=True)
+    # entry_pca_gain = IntParameter(1, 50, default=4, space='entry', load=True, optimize=True)
     #
-    # sell_pca_gain = IntParameter(-1, -15, default=-4, space='sell', load=True, optimize=True)
+    # exit_pca_gain = IntParameter(-1, -15, default=-4, space='exit', load=True, optimize=True)
 
-    # Custom Sell Profit (formerly Dynamic ROI)
-    csell_roi_type = CategoricalParameter(['static', 'decay', 'step'], default='step', space='sell', load=True,
+    # Custom exit Profit (formerly Dynamic ROI)
+    cexit_roi_type = CategoricalParameter(['static', 'decay', 'step'], default='step', space='exit', load=True,
                                           optimize=True)
-    csell_roi_time = IntParameter(720, 1440, default=720, space='sell', load=True, optimize=True)
-    csell_roi_start = DecimalParameter(0.01, 0.05, default=0.01, space='sell', load=True, optimize=True)
-    csell_roi_end = DecimalParameter(0.0, 0.01, default=0, space='sell', load=True, optimize=True)
-    csell_trend_type = CategoricalParameter(['rmi', 'ssl', 'candle', 'any', 'none'], default='any', space='sell',
+    cexit_roi_time = IntParameter(720, 1440, default=720, space='exit', load=True, optimize=True)
+    cexit_roi_start = DecimalParameter(0.01, 0.05, default=0.01, space='exit', load=True, optimize=True)
+    cexit_roi_end = DecimalParameter(0.0, 0.01, default=0, space='exit', load=True, optimize=True)
+    cexit_trend_type = CategoricalParameter(['rmi', 'ssl', 'candle', 'any', 'none'], default='any', space='exit',
                                             load=True, optimize=True)
-    csell_pullback = CategoricalParameter([True, False], default=True, space='sell', load=True, optimize=True)
-    csell_pullback_amount = DecimalParameter(0.005, 0.03, default=0.01, space='sell', load=True, optimize=True)
-    csell_pullback_respect_roi = CategoricalParameter([True, False], default=False, space='sell', load=True,
+    cexit_pullback = CategoricalParameter([True, False], default=True, space='exit', load=True, optimize=True)
+    cexit_pullback_amount = DecimalParameter(0.005, 0.03, default=0.01, space='exit', load=True, optimize=True)
+    cexit_pullback_respect_roi = CategoricalParameter([True, False], default=False, space='exit', load=True,
                                                       optimize=True)
-    csell_endtrend_respect_roi = CategoricalParameter([True, False], default=False, space='sell', load=True,
+    cexit_endtrend_respect_roi = CategoricalParameter([True, False], default=False, space='exit', load=True,
                                                       optimize=True)
 
     # Custom Stoploss
-    cstop_loss_threshold = DecimalParameter(-0.05, -0.01, default=-0.03, space='sell', load=True, optimize=True)
-    cstop_bail_how = CategoricalParameter(['roc', 'time', 'any', 'none'], default='none', space='sell', load=True,
+    cstop_loss_threshold = DecimalParameter(-0.05, -0.01, default=-0.03, space='exit', load=True, optimize=True)
+    cstop_bail_how = CategoricalParameter(['roc', 'time', 'any', 'none'], default='none', space='exit', load=True,
                                           optimize=True)
-    cstop_bail_roc = DecimalParameter(-5.0, -1.0, default=-3.0, space='sell', load=True, optimize=True)
-    cstop_bail_time = IntParameter(60, 1440, default=720, space='sell', load=True, optimize=True)
-    cstop_bail_time_trend = CategoricalParameter([True, False], default=True, space='sell', load=True, optimize=True)
-    cstop_max_stoploss = DecimalParameter(-0.30, -0.01, default=-0.10, space='sell', load=True, optimize=True)
+    cstop_bail_roc = DecimalParameter(-5.0, -1.0, default=-3.0, space='exit', load=True, optimize=True)
+    cstop_bail_time = IntParameter(60, 1440, default=720, space='exit', load=True, optimize=True)
+    cstop_bail_time_trend = CategoricalParameter([True, False], default=True, space='exit', load=True, optimize=True)
+    cstop_max_stoploss = DecimalParameter(-0.30, -0.01, default=-0.10, space='exit', load=True, optimize=True)
 
     ###################################
 
@@ -173,7 +173,7 @@ class PCA_dwt(PCA):
 
     # find where future price is higher/lower than previous window max/min and exceeds threshold
 
-    def get_train_buy_signals(self, future_df: DataFrame):
+    def get_train_entry_signals(self, future_df: DataFrame):
         series = np.where(
             (
                 # forward model above backward model
@@ -186,7 +186,7 @@ class PCA_dwt(PCA):
 
         return series
 
-    def get_train_sell_signals(self, future_df: DataFrame):
+    def get_train_exit_signals(self, future_df: DataFrame):
         series = np.where(
             (
                 # forward model above backward model
