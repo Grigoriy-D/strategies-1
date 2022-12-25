@@ -1975,9 +1975,9 @@ class PCA(IStrategy):
         dataframe.loc[pca_cond, 'enter_tag'] += 'pca_entry '
 
         if conditions:
-            dataframe.loc[reduce(lambda x, y: x & y, conditions), 'entry'] = 1
+            dataframe.loc[reduce(lambda x, y: x & y, conditions), 'enter_long'] = 1
         else:
-            dataframe['entry'] = 0
+            dataframe['enter_long'] = 0
 
         return dataframe
 
@@ -2023,9 +2023,9 @@ class PCA(IStrategy):
         dataframe.loc[pca_cond, 'exit_tag'] += 'pca_exit '
 
         if conditions:
-            dataframe.loc[reduce(lambda x, y: x & y, conditions), 'exit'] = 1
+            dataframe.loc[reduce(lambda x, y: x & y, conditions), 'exit_long'] = 1
         else:
-            dataframe['exit'] = 0
+            dataframe['exit_long'] = 0
 
         return dataframe
 
