@@ -577,7 +577,7 @@ class PCA(IStrategy):
         dataframe['mfi'] = ta.MFI(dataframe)
 
         # Volume Flow Indicator (MFI) for volume based on the direction of price movement
-        dataframe['vfi'] = fta.VFI(dataframe, period=14)
+        # dataframe['vfi'] = fta.VFI(dataframe, period=14)
 
         # ATR
         dataframe['atr'] = ta.ATR(dataframe, timeperiod=win_size)
