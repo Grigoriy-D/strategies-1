@@ -89,7 +89,7 @@ from LSTM2AutoEncoder import LSTM2AutoEncoder
 PCA - uses Principal Component Analysis to try and reduce the total set of indicators
       to more manageable dimensions, and predict the next gain step.
       
-      This works by creating a PCA model of the available technical indicators. This produces a 
+      This works by creating  a PCA model of the available technical indicators. This produces a 
       mapping of the indicators and how they affect the outcome (entry/exit/hold). We choose only the
       mappings that have a significant effect and ignore the others. This significantly reduces the size
       of the problem.
