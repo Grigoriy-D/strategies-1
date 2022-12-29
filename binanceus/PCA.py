@@ -202,28 +202,28 @@ class PCA(IStrategy):
     # exit_pca_gain = IntParameter(-1, -15, default=-4, space='exit', load=True, optimize=True)
 
     # Custom exit Profit (formerly Dynamic ROI)
-    cexit_roi_type = CategoricalParameter(['static', 'decay', 'step'], default='step', space='exit', load=True,
+    cexit_roi_type = CategoricalParameter(['static', 'decay', 'step'], default='step', space='sell', load=True,
                                           optimize=True)
-    cexit_roi_time = IntParameter(720, 1440, default=720, space='exit', load=True, optimize=True)
-    cexit_roi_start = DecimalParameter(0.01, 0.05, default=0.01, space='exit', load=True, optimize=True)
-    cexit_roi_end = DecimalParameter(0.0, 0.01, default=0, space='exit', load=True, optimize=True)
-    cexit_trend_type = CategoricalParameter(['rmi', 'ssl', 'candle', 'any', 'none'], default='any', space='exit',
+    cexit_roi_time = IntParameter(720, 1440, default=720, space='sell', load=True, optimize=True)
+    cexit_roi_start = DecimalParameter(0.01, 0.05, default=0.01, space='sell', load=True, optimize=True)
+    cexit_roi_end = DecimalParameter(0.0, 0.01, default=0, space='sell', load=True, optimize=True)
+    cexit_trend_type = CategoricalParameter(['rmi', 'ssl', 'candle', 'any', 'none'], default='any', space='sell',
                                             load=True, optimize=True)
-    cexit_pullback = CategoricalParameter([True, False], default=True, space='exit', load=True, optimize=True)
-    cexit_pullback_amount = DecimalParameter(0.005, 0.03, default=0.01, space='exit', load=True, optimize=True)
-    cexit_pullback_respect_roi = CategoricalParameter([True, False], default=False, space='exit', load=True,
+    cexit_pullback = CategoricalParameter([True, False], default=True, space='sell', load=True, optimize=True)
+    cexit_pullback_amount = DecimalParameter(0.005, 0.03, default=0.01, space='sell', load=True, optimize=True)
+    cexit_pullback_respect_roi = CategoricalParameter([True, False], default=False, space='sell', load=True,
                                                       optimize=True)
     cexit_endtrend_respect_roi = CategoricalParameter([True, False], default=False, space='exit', load=True,
                                                       optimize=True)
 
     # Custom Stoploss
-    cstop_loss_threshold = DecimalParameter(-0.05, -0.01, default=-0.03, space='exit', load=True, optimize=True)
-    cstop_bail_how = CategoricalParameter(['roc', 'time', 'any', 'none'], default='none', space='exit', load=True,
+    cstop_loss_threshold = DecimalParameter(-0.05, -0.01, default=-0.03, space='sell', load=True, optimize=True)
+    cstop_bail_how = CategoricalParameter(['roc', 'time', 'any', 'none'], default='none', space='sell', load=True,
                                           optimize=True)
-    cstop_bail_roc = DecimalParameter(-5.0, -1.0, default=-3.0, space='exit', load=True, optimize=True)
-    cstop_bail_time = IntParameter(60, 1440, default=720, space='exit', load=True, optimize=True)
-    cstop_bail_time_trend = CategoricalParameter([True, False], default=True, space='exit', load=True, optimize=True)
-    cstop_max_stoploss = DecimalParameter(-0.30, -0.01, default=-0.10, space='exit', load=True, optimize=True)
+    cstop_bail_roc = DecimalParameter(-5.0, -1.0, default=-3.0, space='sell', load=True, optimize=True)
+    cstop_bail_time = IntParameter(60, 1440, default=720, space='sell', load=True, optimize=True)
+    cstop_bail_time_trend = CategoricalParameter([True, False], default=True, space='sell', load=True, optimize=True)
+    cstop_max_stoploss = DecimalParameter(-0.30, -0.01, default=-0.10, space='sell', load=True, optimize=True)
 
     ################################
 
@@ -1912,7 +1912,7 @@ class PCA(IStrategy):
             if 'exit' in self.classifier_stats:
                 print("")
                 table = PrettyTable(["Classifier", "Mean Score", "Selected"])
-                table.title = "exit Classifiers"
+                table.title = "Exit Classifiers"
                 table.align["Classifier"] = "l"
                 table.align["Mean Score"] = "c"
                 table.float_format = '.4'
@@ -1984,7 +1984,7 @@ class PCA(IStrategy):
     ###################################
 
     """
-    exit Signal
+    Exit Signal
     """
 
     def populate_exit_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
@@ -2067,7 +2067,7 @@ class PCA(IStrategy):
     ###################################
 
     """
-    Custom exit
+    Custom Exit
     """
 
     def custom_exit(self, pair: str, trade: 'Trade', current_time: 'datetime', current_rate: float,
@@ -2146,7 +2146,7 @@ class PCA(IStrategy):
 
 #######################
 
-# Utility functions
+# Utility Functions
 
 
 # Elliot Wave Oscillator
