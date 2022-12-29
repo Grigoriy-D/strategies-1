@@ -137,7 +137,7 @@ class LSTM2(IStrategy):
     curr_pair = ""
     custom_trade_info = {}
 
-    # profit/loss thresholds used for assessing buy/sell signals. Keep these realistic!
+    # profit/loss thresholds used for assessing entry/exit signals. Keep these realistic!
     # Note: if self.dynamic_gain_thresholds is True, these will be adjusted for each pair, based on historical mean
     default_profit_threshold = 0.3
     default_loss_threshold = -0.3
@@ -153,7 +153,7 @@ class LSTM2(IStrategy):
 
     # debug flags
     first_time = True  # mostly for debug
-    first_run = True  # used to identify first time through buy/sell populate funcs
+    first_run = True  # used to identify first time through entry/exit populate funcs
 
     dbg_verbose = True  # controls debug output
     dbg_curr_df: DataFrame = None  # for debugging of current dataframe
@@ -173,9 +173,9 @@ class LSTM2(IStrategy):
 
     # LSTM hyperparams
 
-    # Custom Sell Profit (formerly Dynamic ROI)
+    # Custom exit Profit (formerly Dynamic ROI)
 
-    sell_params = {
+    exit_params = {
         "pHSL": -0.186,
         "pPF_1": 0.011,
         "pPF_2": 0.071,
@@ -198,7 +198,7 @@ class LSTM2(IStrategy):
 
 
     """
-    inf Pair Definitions
+    Informative Pair Definitions
     """
 
     def inf_pairs(self):
@@ -767,10 +767,10 @@ class LSTM2(IStrategy):
     ################################
 
     """
-    Buy Signal
+    entry Signal
     """
 
-    def populate_buy_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
+    def populate_entry_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
         conditions = []
         dataframe.loc[:, 'enter_tag'] = ''
         curr_pair = metadata['pair']
@@ -779,7 +779,7 @@ class LSTM2(IStrategy):
 
         # add some fairly loose guards, to help prevent 'bad' predictions
 
-        # # ATR in buy range
+        # # ATR in entry range
         # conditions.append(dataframe['atr_signal'] > 0.0)
 
         # some trading volume
@@ -801,26 +801,26 @@ class LSTM2(IStrategy):
         dataframe.loc[lstm_cond, 'enter_tag'] += 'lstm_entry '
 
         if conditions:
-            dataframe.loc[reduce(lambda x, y: x & y, conditions), 'buy'] = 1
+            dataframe.loc[reduce(lambda x, y: x & y, conditions), 'enter'] = 1
         else:
-            dataframe['buy'] = 0
+            dataframe['enter'] = 0
 
         return dataframe
 
     ###################################
 
     """
-    Sell Signal
+    exit Signal
     """
 
-    def populate_sell_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
+    def populate_exit_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
         conditions = []
         dataframe.loc[:, 'exit_tag'] = ''
         curr_pair = metadata['pair']
 
         conditions.append(dataframe['volume'] > 0)
 
-        # # ATR in sell range
+        # # ATR in exit range
         # conditions.append(dataframe['atr_signal'] <= 0.0)
 
         # # above Bollinger mid-point
@@ -839,9 +839,9 @@ class LSTM2(IStrategy):
         dataframe.loc[lstm_cond, 'exit_tag'] += 'lstm_exit '
 
         if conditions:
-            dataframe.loc[reduce(lambda x, y: x & y, conditions), 'sell'] = 1
+            dataframe.loc[reduce(lambda x, y: x & y, conditions), 'exit'] = 1
         else:
-            dataframe['sell'] = 0
+            dataframe['exit'] = 0
 
         return dataframe
 
@@ -881,10 +881,10 @@ class LSTM2(IStrategy):
     ###################################
     #
     # """
-    # Custom Sell
+    # Custom exit
     # """
     #
-    # def custom_sell(self, pair: str, trade: 'Trade', current_time: 'datetime', current_rate: float,
+    # def custom_exit(self, pair: str, trade: 'Trade', current_time: 'datetime', current_rate: float,
     #                 current_profit: float, **kwargs):
     #
     #     dataframe, _ = self.dp.get_analyzed_dataframe(pair=pair, timeframe=self.timeframe)
@@ -892,41 +892,41 @@ class LSTM2(IStrategy):
     #
     #     trade_dur = int((current_time.timestamp() - trade.open_date_utc.timestamp()) // 60)
     #     max_profit = max(0, trade.calc_profit_ratio(trade.max_rate))
-    #     pullback_value = max(0, (max_profit - self.csell_pullback_amount.value))
+    #     pullback_value = max(0, (max_profit - self.cexit_pullback_amount.value))
     #     in_trend = False
     #
     #     # Determine our current ROI point based on the defined type
-    #     if self.csell_roi_type.value == 'static':
-    #         min_roi = self.csell_roi_start.value
-    #     elif self.csell_roi_type.value == 'decay':
-    #         min_roi = cta.linear_decay(self.csell_roi_start.value, self.csell_roi_end.value, 0,
-    #                                    self.csell_roi_time.value, trade_dur)
-    #     elif self.csell_roi_type.value == 'step':
-    #         if trade_dur < self.csell_roi_time.value:
-    #             min_roi = self.csell_roi_start.value
+    #     if self.cexit_roi_type.value == 'static':
+    #         min_roi = self.cexit_roi_start.value
+    #     elif self.cexit_roi_type.value == 'decay':
+    #         min_roi = cta.linear_decay(self.cexit_roi_start.value, self.cexit_roi_end.value, 0,
+    #                                    self.cexit_roi_time.value, trade_dur)
+    #     elif self.cexit_roi_type.value == 'step':
+    #         if trade_dur < self.cexit_roi_time.value:
+    #             min_roi = self.cexit_roi_start.value
     #         else:
-    #             min_roi = self.csell_roi_end.value
+    #             min_roi = self.cexit_roi_end.value
     #
     #     # Determine if there is a trend
-    #     if self.csell_trend_type.value == 'rmi' or self.csell_trend_type.value == 'any':
+    #     if self.cexit_trend_type.value == 'rmi' or self.cexit_trend_type.value == 'any':
     #         if last_candle['rmi_up_trend'] == 1:
     #             in_trend = True
-    #     if self.csell_trend_type.value == 'ssl' or self.csell_trend_type.value == 'any':
+    #     if self.cexit_trend_type.value == 'ssl' or self.cexit_trend_type.value == 'any':
     #         if last_candle['ssl_dir'] == 1:
     #             in_trend = True
-    #     if self.csell_trend_type.value == 'candle' or self.csell_trend_type.value == 'any':
+    #     if self.cexit_trend_type.value == 'candle' or self.cexit_trend_type.value == 'any':
     #         if last_candle['candle_up_trend'] == 1:
     #             in_trend = True
     #
-    #     # Don't sell if we are in a trend unless the pullback threshold is met
+    #     # Don't exit if we are in a trend unless the pullback threshold is met
     #     if in_trend == True and current_profit > 0:
-    #         # Record that we were in a trend for this trade/pair for a more useful sell message later
+    #         # Record that we were in a trend for this trade/pair for a more useful exit message later
     #         self.custom_trade_info[trade.pair]['had_trend'] = True
-    #         # If pullback is enabled and profit has pulled back allow a sell, maybe
-    #         if self.csell_pullback.value == True and (current_profit <= pullback_value):
-    #             if self.csell_pullback_respect_roi.value == True and current_profit > min_roi:
+    #         # If pullback is enabled and profit has pulled back allow a exit, maybe
+    #         if self.cexit_pullback.value == True and (current_profit <= pullback_value):
+    #             if self.cexit_pullback_respect_roi.value == True and current_profit > min_roi:
     #                 return 'intrend_pullback_roi'
-    #             elif self.csell_pullback_respect_roi.value == False:
+    #             elif self.cexit_pullback_respect_roi.value == False:
     #                 if current_profit > min_roi:
     #                     return 'intrend_pullback_roi'
     #                 else:
@@ -939,7 +939,7 @@ class LSTM2(IStrategy):
     #             if current_profit > min_roi:
     #                 self.custom_trade_info[trade.pair]['had_trend'] = False
     #                 return 'trend_roi'
-    #             elif self.csell_endtrend_respect_roi.value == False:
+    #             elif self.cexit_endtrend_respect_roi.value == False:
     #                 self.custom_trade_info[trade.pair]['had_trend'] = False
     #                 return 'trend_noroi'
     #         elif current_profit > min_roi:

@@ -188,18 +188,18 @@ class PCA3(IStrategy):
     ## Hyperopt Variables
 
     # Custom Sell Profit (formerly Dynamic ROI)
-    csell_roi_type = CategoricalParameter(['static', 'decay', 'step'], default='step', space='sell', load=True,
+    cexit_roi_type = CategoricalParameter(['static', 'decay', 'step'], default='step', space='sell', load=True,
                                           optimize=True)
-    csell_roi_time = IntParameter(720, 1440, default=720, space='sell', load=True, optimize=True)
-    csell_roi_start = DecimalParameter(0.01, 0.05, default=0.01, space='sell', load=True, optimize=True)
-    csell_roi_end = DecimalParameter(0.0, 0.01, default=0, space='sell', load=True, optimize=True)
-    csell_trend_type = CategoricalParameter(['rmi', 'ssl', 'candle', 'any', 'none'], default='any', space='sell',
+    cexit_roi_time = IntParameter(720, 1440, default=720, space='sell', load=True, optimize=True)
+    cexit_roi_start = DecimalParameter(0.01, 0.05, default=0.01, space='sell', load=True, optimize=True)
+    cexit_roi_end = DecimalParameter(0.0, 0.01, default=0, space='sell', load=True, optimize=True)
+    cexit_trend_type = CategoricalParameter(['rmi', 'ssl', 'candle', 'any', 'none'], default='any', space='sell',
                                             load=True, optimize=True)
-    csell_pullback = CategoricalParameter([True, False], default=True, space='sell', load=True, optimize=True)
-    csell_pullback_amount = DecimalParameter(0.005, 0.03, default=0.01, space='sell', load=True, optimize=True)
-    csell_pullback_respect_roi = CategoricalParameter([True, False], default=False, space='sell', load=True,
+    cexit_pullback = CategoricalParameter([True, False], default=True, space='sell', load=True, optimize=True)
+    cexit_pullback_amount = DecimalParameter(0.005, 0.03, default=0.01, space='sell', load=True, optimize=True)
+    cexit_pullback_respect_roi = CategoricalParameter([True, False], default=False, space='sell', load=True,
                                                       optimize=True)
-    csell_endtrend_respect_roi = CategoricalParameter([True, False], default=False, space='sell', load=True,
+    cexit_endtrend_respect_roi = CategoricalParameter([True, False], default=False, space='sell', load=True,
                                                       optimize=True)
 
     # Custom Stoploss
@@ -552,7 +552,7 @@ class PCA3(IStrategy):
         # dataframe['mfi_signal'] = dataframe['mfi_buy'] - dataframe['mfi_sell']
 
         # Volume Flow Indicator (MFI) for volume based on the direction of price movement
-        dataframe['vfi'] = fta.VFI(dataframe, period=14)
+        # dataframe['vfi'] = fta.VFI(dataframe, period=14)
         # dataframe['vfi_norm'] = self.norm_column(dataframe['vfi'])
         # dataframe['vfi_buy'] = np.where((dataframe['vfi_norm'] > 0.5), 1.0, 0.0)
         # dataframe['vfi_sell'] = np.where((dataframe['vfi_norm'] <= -0.5), 1.0, 0.0)
@@ -1861,7 +1861,7 @@ class PCA3(IStrategy):
     Buy Signal
     """
 
-    def populate_buy_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
+    def populate_entry_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
         conditions = []
         dataframe.loc[:, 'enter_tag'] = ''
         curr_pair = metadata['pair']
@@ -1909,10 +1909,10 @@ class PCA3(IStrategy):
     ###################################
 
     """
-    Sell Signal
+    Exit Signal
     """
 
-    def populate_sell_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
+    def populate_exit_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
         conditions = []
         dataframe.loc[:, 'exit_tag'] = ''
         curr_pair = metadata['pair']
@@ -1990,10 +1990,10 @@ class PCA3(IStrategy):
         ###################################
 
         """
-        Custom Sell
+        Custom Exit
         """
 
-        def custom_sell(self, pair: str, trade: 'Trade', current_time: 'datetime', current_rate: float,
+        def custom_exit(self, pair: str, trade: 'Trade', current_time: 'datetime', current_rate: float,
                         current_profit: float, **kwargs):
 
             dataframe, _ = self.dp.get_analyzed_dataframe(pair=pair, timeframe=self.timeframe)
