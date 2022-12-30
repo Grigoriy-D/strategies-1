@@ -113,7 +113,7 @@ class PCA(IStrategy):
 
     # ROI table:
     minimal_roi = {
-        "0": 0.05
+        "0": 0.10
     }
 
     # Stoploss:
@@ -213,7 +213,7 @@ class PCA(IStrategy):
     cexit_pullback_amount = DecimalParameter(0.005, 0.03, default=0.01, space='sell', load=True, optimize=True)
     cexit_pullback_respect_roi = CategoricalParameter([True, False], default=False, space='sell', load=True,
                                                       optimize=True)
-    cexit_endtrend_respect_roi = CategoricalParameter([True, False], default=False, space='exit', load=True,
+    cexit_endtrend_respect_roi = CategoricalParameter([True, False], default=False, space='sell', load=True,
                                                       optimize=True)
 
     # Custom Stoploss
@@ -272,7 +272,7 @@ class PCA(IStrategy):
     ################################
 
     """
-    inf Pair Definitions
+    Inf Pair Definitions
     """
 
     def inf_pairs(self):
@@ -1784,7 +1784,7 @@ class PCA(IStrategy):
         clf = self.pair_model_info[pair]['clf_entry']
 
         if clf is None:
-            print("    No entry Classifier for pair ", pair, " -Skipping predictions")
+            print("    No Entry Classifier for pair ", pair, " -Skipping predictions")
             self.pair_model_info[pair]['interval'] = min(self.pair_model_info[pair]['interval'], 4)
             predict = df['close'].copy()  # just to get the size
             predict = 0.0
@@ -1816,7 +1816,7 @@ class PCA(IStrategy):
     def predict_exit(self, df: DataFrame, pair):
         clf = self.pair_model_info[pair]['clf_exit']
         if clf is None:
-            print("    No exit Classifier for pair ", pair, " -Skipping predictions")
+            print("    No Exit Classifier for pair ", pair, " -Skipping predictions")
             self.pair_model_info[pair]['interval'] = min(self.pair_model_info[pair]['interval'], 4)
             predict = df['close']  # just to get the size
             predict = 0.0
@@ -1896,7 +1896,7 @@ class PCA(IStrategy):
             if 'entry' in self.classifier_stats:
                 print("")
                 table = PrettyTable(["Classifier", "Mean Score", "Selected"])
-                table.title = "entry Classifiers"
+                table.title = "Entry Classifiers"
                 table.align["Classifier"] = "l"
                 table.align["Mean Score"] = "c"
                 table.float_format = '.4'

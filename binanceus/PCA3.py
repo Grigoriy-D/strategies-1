@@ -1858,7 +1858,7 @@ class PCA3(IStrategy):
     ###################################
 
     """
-    Buy Signal
+    Entry Signal
     """
 
     def populate_entry_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
