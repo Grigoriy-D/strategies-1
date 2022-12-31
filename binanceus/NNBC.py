@@ -88,13 +88,29 @@ NNBC - Neural Net Binary Classifier
     Neural Networks set up as binary classifiers.
       
     This works by creating a PCA model of the available technical indicators. This produces a 
-    mapping of the indicators and how they affect the outcome (entry/exit/hold). We choose only the
+    mapping of the indicators and how they affect the outcome (buy/sell/hold). We choose only the
     mappings that have a significant effect and ignore the others. This significantly reduces the size
     of the problem.
-    We then train a classifier model to predict entry or exit signals based on the known outcome in the
-    informative data, and use it to predict entry/exit signals based on the real-time dataframe.
+    We then train a classifier model to predict buy or sell signals based on the known outcome in the
+    informative data, and use it to predict buy/sell signals based on the real-time dataframe.
     Several different Neural Network types are available, and they can either all be tested, or a pre-configured
     classifier can be used.
+    
+    Notes: 
+    - Neural Nets need lots of data to train, and there are typically not enough buy/sell events
+    in the 'normal' buffer (975 samples) to do that training sufficiently well. So, we only train in backtest mode,
+    then save the resulting model. Other modes (hyperopt, plot etc.) will just load the saved model and use it.
+    This means that you should run backtest with a (very) long time period (I suggest a full year).
+    
+    - To help avoid over-fitting, I train a single classifier across all pairs (obe for buy, another for sell). This
+    should provide a more general model
+    
+    - models are saved in the models/ directory, relative to the current path. You will likely need to copy the models
+    to the location whre you run your strategies
+    
+    - This is intended as a base class. Actual strategis will inherit from this class and then modify the
+    buy and sell criteria
+    
       
     Note that this is very slow to start up. This is mostly because we have to build the data on a rolling
     basis to avoid lookahead bias.
@@ -110,19 +126,17 @@ NNBC - Neural Net Binary Classifier
 
 
 class NNBC(IStrategy):
+
     plot_config = {
         'main_plot': {
-            'dwt_smooth': {'color': 'teal'},
+            'close': {'color': 'cornflowerblue'},
         },
         'subplots': {
             "Diff": {
-                '%train_entry': {'color': 'green'},
-                'predict_entry': {'color': 'blue'},
-                '%train_exit': {'color': 'red'},
-                'predict_exit': {'color': 'orange'},
-                'dwt_bottom': {'color': 'magenta'},
-                'dwt_top': {'color': 'cyan'},
-                'mfi': {'color': 'purple'},
+                '%train_buy': {'color': 'mediumaquamarine'},
+                'predict_buy': {'color': 'cornflowerblue'},
+                '%train_sell': {'color': 'salmon'},
+                'predict_sell': {'color': 'orange'},
             },
         }
     }
@@ -158,6 +172,7 @@ class NNBC(IStrategy):
     startup_candle_count: int = 128  # must be power of 2
     process_only_new_candles = True
 
+    #------------------------------
     # Strategy-specific global vars
 
     inf_mins = timeframe_to_minutes(inf_timeframe)
@@ -172,12 +187,19 @@ class NNBC(IStrategy):
     n_loss_stddevs = 1.0
     min_f1_score = 0.5
 
+    compressor = None
+    compress_data = True
+    # classifier_name = 'Transformer'  # select based on testing
+    classifier_name = 'Multihead'  # select based on testing
+    buy_classifier = None
+    sell_classifier = None
+
     curr_lookahead = int(12 * lookahead_hours)
 
     curr_pair = ""
     custom_trade_info = {}
 
-    # profit/loss thresholds used for assessing entry/exit signals. Keep these realistic!
+    # profit/loss thresholds used for assessing buy/sell signals. Keep these realistic!
     # Note: if self.dynamic_gain_thresholds is True, these will be adjusted for each pair, based on historical mean
     default_profit_threshold = 0.3
     default_loss_threshold = -0.3
@@ -191,21 +213,21 @@ class NNBC(IStrategy):
     batch_size = 1024  # batch size for training
 
     cherrypick_data = False
-    preload_model = True  # don't set to true if you are changing entry/exit conditions or tweaking models
+    refit_model = True  # only set to True when training. If False, then existing model is used, if present
     use_full_dataset = True  # use the entire dataset for training (in backtest/hyperopt)
 
-    entry_tag = 'entry'
-    exit_tag = 'exit'
+    buy_tag = 'buy'
+    sell_tag = 'sell'
 
     dwt_window = startup_candle_count
 
     num_pairs = 0
-    pair_model_info = {}  # holds model-related info for each pair
-    classifier_stats = {}  # holds statistics for each type of classifier (useful to rank classifiers
+    # pair_model_info = {}  # holds model-related info for each pair
+    # classifier_stats = {}  # holds statistics for each type of classifier (useful to rank classifiers
 
     # debug flags
     first_time = True  # mostly for debug
-    first_run = True  # used to identify first time through entry/exit populate funcs
+    first_run = True  # used to identify first time through buy/sell populate funcs
 
     dbg_scan_classifiers = True  # if True, scan all viable classifiers and choose the best. Very slow!
     dbg_test_classifier = True  # test clasifiers after fitting
@@ -226,23 +248,23 @@ class NNBC(IStrategy):
     ## Hyperopt Variables
 
     #  hyperparams
-    # entry_gain = IntParameter(1, 50, default=4, space='entry', load=True, optimize=True)
+    # buy_gain = IntParameter(1, 50, default=4, space='buy', load=True, optimize=True)
     #
-    # exit_gain = IntParameter(-1, -15, default=-4, space='exit', load=True, optimize=True)
+    # sell_gain = IntParameter(-1, -15, default=-4, space='sell', load=True, optimize=True)
 
-    # Custom exit Profit (formerly Dynamic ROI)
-    cexit_roi_type = CategoricalParameter(['static', 'decay', 'step'], default='step', space='sell', load=True,
+    # Custom Sell Profit (formerly Dynamic ROI)
+    csell_roi_type = CategoricalParameter(['static', 'decay', 'step'], default='step', space='sell', load=True,
                                           optimize=True)
-    cexit_roi_time = IntParameter(720, 1440, default=720, space='sell', load=True, optimize=True)
-    cexit_roi_start = DecimalParameter(0.01, 0.05, default=0.01, space='sell', load=True, optimize=True)
-    cexit_roi_end = DecimalParameter(0.0, 0.01, default=0, space='sell', load=True, optimize=True)
-    cexit_trend_type = CategoricalParameter(['rmi', 'ssl', 'candle', 'any', 'none'], default='any', space='sell',
+    csell_roi_time = IntParameter(720, 1440, default=720, space='sell', load=True, optimize=True)
+    csell_roi_start = DecimalParameter(0.01, 0.05, default=0.01, space='sell', load=True, optimize=True)
+    csell_roi_end = DecimalParameter(0.0, 0.01, default=0, space='sell', load=True, optimize=True)
+    csell_trend_type = CategoricalParameter(['rmi', 'ssl', 'candle', 'any', 'none'], default='any', space='sell',
                                             load=True, optimize=True)
-    cexit_pullback = CategoricalParameter([True, False], default=True, space='sell', load=True, optimize=True)
-    cexit_pullback_amount = DecimalParameter(0.005, 0.03, default=0.01, space='sell', load=True, optimize=True)
-    cexit_pullback_respect_roi = CategoricalParameter([True, False], default=False, space='sell', load=True,
+    csell_pullback = CategoricalParameter([True, False], default=True, space='sell', load=True, optimize=True)
+    csell_pullback_amount = DecimalParameter(0.005, 0.03, default=0.01, space='sell', load=True, optimize=True)
+    csell_pullback_respect_roi = CategoricalParameter([True, False], default=False, space='sell', load=True,
                                                       optimize=True)
-    cexit_endtrend_respect_roi = CategoricalParameter([True, False], default=False, space='sell', load=True,
+    csell_endtrend_respect_roi = CategoricalParameter([True, False], default=False, space='sell', load=True,
                                                       optimize=True)
 
     # Custom Stoploss
@@ -260,14 +282,14 @@ class NNBC(IStrategy):
 
     # Note: try to combine current/historical data (from populate_indicators) with future data
     #       If you only use future data, the ML training is just guessing
-    #       Also, try to identify entry/exit ranges, rather than transitions - it gives the algorithms more chances
+    #       Also, try to identify buy/sell ranges, rather than transitions - it gives the algorithms more chances
     #       to find a correlation. The framework will select the first one anyway.
     #       In other words, avoid using qtpylib.crossed_above() and qtpylib.crossed_below()
     #       Proably OK not to check volume, because we are just looking for patterns
 
-    def get_train_entry_signals(self, future_df: DataFrame):
+    def get_train_buy_signals(self, future_df: DataFrame):
 
-        print("!!! WARNING: using base class (entry) training implementation !!!")
+        print("!!! WARNING: using base class (buy) training implementation !!!")
 
         series = np.where(
             (
@@ -277,9 +299,9 @@ class NNBC(IStrategy):
 
         return series
 
-    def get_train_exit_signals(self, future_df: DataFrame):
+    def get_train_sell_signals(self, future_df: DataFrame):
 
-        print("!!! WARNING: using base class (exit) training implementation !!!")
+        print("!!! WARNING: using base class (sell) training implementation !!!")
 
         series = np.where(
             (
@@ -289,12 +311,12 @@ class NNBC(IStrategy):
 
         return series
 
-    # override the following to add strategy-specific criteria to the (main) entry/exit conditions
+    # override the following to add strategy-specific criteria to the (main) buy/sell conditions
 
-    def get_strategy_entry_conditions(self, dataframe: DataFrame):
+    def get_strategy_buy_conditions(self, dataframe: DataFrame):
         return None
 
-    def get_strategy_exit_conditions(self, dataframe: DataFrame):
+    def get_strategy_sell_conditions(self, dataframe: DataFrame):
         return None
 
     ################################
@@ -341,48 +363,45 @@ class NNBC(IStrategy):
             print("    Thresholds - Profit:{:.2f}% Loss:{:.2f}%".format(self.profit_threshold,
                                                                         self.loss_threshold))
 
+        # make sure we only retrain in backtest modes
+        if self.dp.runmode.value not in ('backtest'):
+            self.refit_model = False
+
+        if self.buy_classifier is None:
+            self.buy_classifier = self.load_model(self.classifier_name, self.buy_tag)
+
+        if self.sell_classifier is None:
+            self.sell_classifier = self.load_model(self.classifier_name, self.sell_tag)
+
         print("")
         print(curr_pair)
-
-        # if first time through for this pair, add entry to pair_model_info
-        if not (curr_pair in self.pair_model_info):
-            self.pair_model_info[curr_pair] = {
-                'interval': 0,
-                'clf_entry_name': "",
-                'clf_entry': None,
-                'clf_exit_name': "",
-                'clf_exit': None
-            }
-        else:
-            # decrement interval. When this reaches 0 it will trigger re-fitting of the data
-            self.pair_model_info[curr_pair]['interval'] = self.pair_model_info[curr_pair]['interval'] - 1
 
         # populate the normal dataframe
         dataframe = self.add_indicators(dataframe)
 
-        entries, exits = self.create_training_data(dataframe)
+        buys, sells = self.create_training_data(dataframe)
 
         # drop last group (because there cannot be a prediction)
         df = dataframe.iloc[:-self.curr_lookahead]
-        entries = entries.iloc[:-self.curr_lookahead]
-        exits = exits.iloc[:-self.curr_lookahead]
+        buys = buys.iloc[:-self.curr_lookahead]
+        sells = sells.iloc[:-self.curr_lookahead]
 
         # Principal Component Analysis of inf data
 
         # train the models on the informative data
         if self.dbg_verbose:
             print("    training models...")
-        self.train_models(curr_pair, df, entries, exits)
+        self.train_models(curr_pair, df, buys, sells)
         # add predictions
 
         if self.dbg_verbose:
             print("    running predictions...")
 
         # get predictions (Note: do not modify dataframe between calls)
-        pred_entries = self.predict_entry(dataframe, curr_pair)
-        pred_exits = self.predict_exit(dataframe, curr_pair)
-        dataframe['predict_entry'] = pred_entries
-        dataframe['predict_exit'] = pred_exits
+        pred_buys = self.predict_buy(dataframe, curr_pair)
+        pred_sells = self.predict_sell(dataframe, curr_pair)
+        dataframe['predict_buy'] = pred_buys
+        dataframe['predict_sell'] = pred_sells
 
         # Custom Stoploss
         if self.dbg_verbose:
@@ -583,23 +602,23 @@ class NNBC(IStrategy):
         # MFI
         dataframe['mfi'] = ta.MFI(dataframe)
         # dataframe['mfi_norm'] = self.norm_column(dataframe['mfi'])
-        # dataframe['mfi_entry'] = np.where((dataframe['mfi_norm'] > 0.5), 1.0, 0.0)
-        # dataframe['mfi_exit'] = np.where((dataframe['mfi_norm'] <= -0.5), 1.0, 0.0)
-        # dataframe['mfi_signal'] = dataframe['mfi_entry'] - dataframe['mfi_exit']
+        # dataframe['mfi_buy'] = np.where((dataframe['mfi_norm'] > 0.5), 1.0, 0.0)
+        # dataframe['mfi_sell'] = np.where((dataframe['mfi_norm'] <= -0.5), 1.0, 0.0)
+        # dataframe['mfi_signal'] = dataframe['mfi_buy'] - dataframe['mfi_sell']
 
         # Volume Flow Indicator (MFI) for volume based on the direction of price movement
-        # dataframe['vfi'] = fta.VFI(dataframe, period=14)
+        dataframe['vfi'] = fta.VFI(dataframe, period=14)
         # dataframe['vfi_norm'] = self.norm_column(dataframe['vfi'])
-        # dataframe['vfi_entry'] = np.where((dataframe['vfi_norm'] > 0.5), 1.0, 0.0)
-        # dataframe['vfi_exit'] = np.where((dataframe['vfi_norm'] <= -0.5), 1.0, 0.0)
-        # dataframe['vfi_signal'] = dataframe['vfi_entry'] - dataframe['vfi_exit']
+        # dataframe['vfi_buy'] = np.where((dataframe['vfi_norm'] > 0.5), 1.0, 0.0)
+        # dataframe['vfi_sell'] = np.where((dataframe['vfi_norm'] <= -0.5), 1.0, 0.0)
+        # dataframe['vfi_signal'] = dataframe['vfi_buy'] - dataframe['vfi_sell']
 
         # ATR
         dataframe['atr'] = ta.ATR(dataframe, timeperiod=win_size)
         # dataframe['atr_norm'] = self.norm_column(dataframe['atr'])
-        # dataframe['atr_entry'] = np.where((dataframe['atr_norm'] > 0.5), 1.0, 0.0)
-        # dataframe['atr_exit'] = np.where((dataframe['atr_norm'] <= -0.5), 1.0, 0.0)
-        # dataframe['atr_signal'] = dataframe['atr_entry'] - dataframe['atr_exit']
+        # dataframe['atr_buy'] = np.where((dataframe['atr_norm'] > 0.5), 1.0, 0.0)
+        # dataframe['atr_sell'] = np.where((dataframe['atr_norm'] <= -0.5), 1.0, 0.0)
+        # dataframe['atr_signal'] = dataframe['atr_buy'] - dataframe['atr_sell']
 
         # Hilbert Transform Indicator - SineWave
         hilbert = ta.HT_SINE(dataframe)
@@ -628,7 +647,7 @@ class NNBC(IStrategy):
 
         # DWT model
         # if in backtest or hyperopt, then we have to do rolling calculations
-        if self.dp.runmode.value in ('hyperopt', 'backtest'):
+        if self.dp.runmode.value in ('plot', 'hyperopt', 'backtest'):
             dataframe['dwt'] = dataframe['close'].rolling(window=self.dwt_window).apply(self.roll_get_dwt)
             dataframe['smooth'] = dataframe['close'].rolling(window=self.dwt_window).apply(self.roll_smooth)
             dataframe['dwt_smooth'] = dataframe['dwt'].rolling(window=self.dwt_window).apply(self.roll_smooth)
@@ -637,13 +656,11 @@ class NNBC(IStrategy):
             dataframe['smooth'] = gaussian_filter1d(dataframe['close'], 2)
             dataframe['dwt_smooth'] = gaussian_filter1d(dataframe['dwt'], 2)
 
+        # dataframe['dwt_smooth'] = dataframe['dwt_smooth'].clip(lower=dataframe['dwt'].min()) # avoid startup artifacts
+        dataframe['dwt_smooth'].replace(0, dataframe['dwt'].min(), inplace=True)
+
         # smoothed version - useful for trends
         # dataframe['dwt_smooth'] = gaussian_filter1d(dataframe['dwt'], 8)
-
-        # dataframe['dwt_deriv'] = np.gradient(dataframe['dwt_smooth'])
-        dataframe['dwt_deriv'] = np.gradient(dataframe['dwt'])
-        dataframe['dwt_top'] = np.where(qtpylib.crossed_below(dataframe['dwt_deriv'], 0.0), 1, 0)
-        dataframe['dwt_bottom'] = np.where(qtpylib.crossed_above(dataframe['dwt_deriv'], 0.0), 1, 0)
 
         dataframe['dwt_diff'] = 100.0 * (dataframe['dwt'] - dataframe['close']) / dataframe['close']
         dataframe['dwt_smooth_diff'] = 100.0 * (dataframe['dwt'] - dataframe['dwt_smooth']) / dataframe['dwt_smooth']
@@ -681,19 +698,19 @@ class NNBC(IStrategy):
         # dataframe['dwt_nseq_up_std'] = dataframe['dwt_nseq_up'].rolling(window=win_size).std()
         # dataframe['dwt_nseq_up_thresh'] = dataframe['dwt_nseq_up_mean'] + \
         #                                   self.n_profit_stddevs * dataframe['dwt_nseq_up_std']
-        # dataframe['dwt_nseq_exit'] = np.where(dataframe['dwt_nseq_up'] > dataframe['dwt_nseq_up_thresh'], 1.0, 0.0)
+        # dataframe['dwt_nseq_sell'] = np.where(dataframe['dwt_nseq_up'] > dataframe['dwt_nseq_up_thresh'], 1.0, 0.0)
 
         dataframe['dwt_dir_dn'] = abs(dataframe['dwt_dir'].clip(upper=0.0))
         dataframe['dwt_nseq_dn'] = dataframe['dwt_dir_dn'] * (dataframe['dwt_dir_dn'].groupby(
             (dataframe['dwt_dir_dn'] != dataframe['dwt_dir_dn'].shift()).cumsum()).cumcount() + 1)
-        dataframe['dwt_nseq_dn'] = dataframe['dwt_nseq_dn'].clip(lower=0.0, upper=20.0)
+        dataframe['dwt_nseq_dn'] = dataframe['dwt_nseq_dn'].clip(lower=0.0, upper=30.0)
 
         # # dataframe['dwt_nseq_dn'] = dataframe['dwt_nseq'].clip(upper=0.0)
         # dataframe['dwt_nseq_dn_mean'] = dataframe['dwt_nseq_dn'].rolling(window=win_size).mean()
         # dataframe['dwt_nseq_dn_std'] = dataframe['dwt_nseq_dn'].rolling(window=win_size).std()
         # dataframe['dwt_nseq_dn_thresh'] = dataframe['dwt_nseq_dn_mean'] - self.n_loss_stddevs * dataframe[
         #     'dwt_nseq_dn_std']
-        # dataframe['dwt_nseq_entry'] = np.where(dataframe['dwt_nseq_dn'] < dataframe['dwt_nseq_dn_thresh'], 1.0, 0.0)
+        # dataframe['dwt_nseq_buy'] = np.where(dataframe['dwt_nseq_dn'] < dataframe['dwt_nseq_dn_thresh'], 1.0, 0.0)
 
         # Recent min/max
         dataframe['dwt_recent_min'] = dataframe['dwt_smooth'].rolling(window=win_size).min()
@@ -711,11 +728,11 @@ class NNBC(IStrategy):
         dataframe['dwt_low'] = dataframe['dwt_smooth'].rolling(window=self.startup_candle_count).min()
         dataframe['dwt_high'] = dataframe['dwt_smooth'].rolling(window=self.startup_candle_count).max()
 
-        # # these are (primarily) clues for the ML algorithm:
-        dataframe['dwt_at_min'] = np.where(dataframe['dwt_smooth'] <= dataframe['dwt_recent_min'], 1.0, 0.0)
-        dataframe['dwt_at_max'] = np.where(dataframe['dwt_smooth'] >= dataframe['dwt_recent_max'], 1.0, 0.0)
-        dataframe['dwt_at_low'] = np.where(dataframe['dwt_smooth'] <= dataframe['dwt_low'], 1.0, 0.0)
-        dataframe['dwt_at_high'] = np.where(dataframe['dwt_smooth'] >= dataframe['dwt_high'], 1.0, 0.0)
+        # # # these are (primarily) clues for the ML algorithm:
+        # dataframe['dwt_at_min'] = np.where(dataframe['dwt_smooth'] <= dataframe['dwt_recent_min'], 1.0, 0.0)
+        # dataframe['dwt_at_max'] = np.where(dataframe['dwt_smooth'] >= dataframe['dwt_recent_max'], 1.0, 0.0)
+        # dataframe['dwt_at_low'] = np.where(dataframe['dwt_smooth'] <= dataframe['dwt_low'], 1.0, 0.0)
+        # dataframe['dwt_at_high'] = np.where(dataframe['dwt_smooth'] >= dataframe['dwt_high'], 1.0, 0.0)
 
         # TODO: remove/fix any columns that contain 'inf'
         self.check_inf(dataframe)
@@ -749,6 +766,13 @@ class NNBC(IStrategy):
             price_col = 'close'
             future_df['full_dwt'] = 0.0
 
+
+        # these look backward, but are here to be safe
+        # dataframe['dwt_deriv'] = np.gradient(dataframe['dwt_smooth'])
+        future_df['dwt_deriv'] = np.gradient(future_df['dwt'])
+        future_df['dwt_top'] = np.where(qtpylib.crossed_below(future_df['dwt_deriv'], 0.0), 1, 0)
+        future_df['dwt_bottom'] = np.where(qtpylib.crossed_above(future_df['dwt_deriv'], 0.0), 1, 0)
+
         # calculate future gains
         future_df['future_close'] = future_df[price_col].shift(-lookahead)
 
@@ -756,7 +780,7 @@ class NNBC(IStrategy):
         future_df['future_gain'].clip(lower=-5.0, upper=5.0, inplace=True)
 
         # gain from beginning of window to end of window
-        future_df['future_win_gain'] = 100.0 * (future_df['dwt'].shift(self.curr_lookahead) - future_df['dwt'] /
+        future_df['future_win_gain'] = 100.0 * (future_df['dwt'].shift(-self.curr_lookahead) - future_df['dwt'] /
                                                 future_df['dwt'])
 
         future_df['future_profit'] = future_df['future_gain'].clip(lower=0.0)
@@ -783,8 +807,8 @@ class NNBC(IStrategy):
         future_df['profit_diff'] = (future_df['future_profit'] - future_df['profit_threshold']) * 10.0
         future_df['loss_diff'] = (future_df['future_loss'] - future_df['loss_threshold']) * 10.0
 
-        # future_df['entry_signal'] = np.where(future_df['profit_diff'] > 0.0, 1.0, 0.0)
-        # future_df['exit_signal'] = np.where(future_df['loss_diff'] < 0.0, -1.0, 0.0)
+        # future_df['buy_signal'] = np.where(future_df['profit_diff'] > 0.0, 1.0, 0.0)
+        # future_df['sell_signal'] = np.where(future_df['loss_diff'] < 0.0, -1.0, 0.0)
 
         # these explicitly uses dwt
         future_df['future_dwt'] = future_df['full_dwt'].shift(-lookahead)
@@ -806,6 +830,7 @@ class NNBC(IStrategy):
         future_win = pd.api.indexers.FixedForwardWindowIndexer(window_size=int(win_size))  # don't use a big window
 
         future_df['future_nseq'] = future_df['curr_trend'].rolling(window=future_win, min_periods=1).sum()
+        # future_df['future_nseq'] = future_df['dwt_nseq'].shift(-lookahead)
 
         # future_df['future_nseq_up'] = 0.0
         # future_df['future_nseq_up'] = np.where(
@@ -813,7 +838,7 @@ class NNBC(IStrategy):
         #     future_df.groupby(future_df["dwt_dir_up"].ne(future_df["dwt_dir_up"].shift(1)).cumsum()).cumcount() + 1,
         #     0.0
         # )
-        future_df['future_nseq_up'] = future_df['future_nseq'].clip(lower=0.0)
+        future_df['future_nseq_up'] = future_df['dwt_nseq_up'].shift(-lookahead)
 
         future_df['future_nseq_up_mean'] = future_df['future_nseq_up'].rolling(window=future_win).mean()
         future_df['future_nseq_up_std'] = future_df['future_nseq_up'].rolling(window=future_win).std()
@@ -826,7 +851,7 @@ class NNBC(IStrategy):
         #     0.0
         # )
         # print(future_df['future_nseq_dn'])
-        future_df['future_nseq_dn'] = future_df['future_nseq'].clip(upper=0.0)
+        future_df['future_nseq_dn'] = future_df['dwt_nseq_dn'].shift(-lookahead)
 
         future_df['future_nseq_dn_mean'] = future_df['future_nseq_dn'].rolling(future_win).mean()
         future_df['future_nseq_dn_std'] = future_df['future_nseq_dn'].rolling(future_win).std()
@@ -864,30 +889,30 @@ class NNBC(IStrategy):
 
     ################################
 
-    # creates the entry/exit labels absed on looking ahead into the supplied dataframe
+    # creates the buy/sell labels absed on looking ahead into the supplied dataframe
     def create_training_data(self, dataframe: DataFrame):
 
         future_df = self.add_future_data(dataframe.copy())
 
-        future_df['train_entry'] = 0.0
-        future_df['train_exit'] = 0.0
+        future_df['train_buy'] = 0.0
+        future_df['train_sell'] = 0.0
 
         # use sequence trends as criteria
-        future_df['train_entry'] = self.get_train_entry_signals(future_df)
-        future_df['train_exit'] = self.get_train_exit_signals(future_df)
+        future_df['train_buy'] = self.get_train_buy_signals(future_df)
+        future_df['train_sell'] = self.get_train_sell_signals(future_df)
 
-        entries = future_df['train_entry'].copy()
-        if entries.sum() < 3:
-            print("OOPS! <3 ({:.0f}) entry signals generated. Check training criteria".format(entries.sum()))
+        buys = future_df['train_buy'].copy()
+        if buys.sum() < 3:
+            print("OOPS! <3 ({:.0f}) buy signals generated. Check training criteria".format(buys.sum()))
 
-        exits = future_df['train_exit'].copy()
-        if entries.sum() < 3:
-            print("OOPS! <3 ({:.0f}) exit signals generated. Check training criteria".format(exits.sum()))
+        sells = future_df['train_sell'].copy()
+        if sells.sum() < 3:
+            print("OOPS! <3 ({:.0f}) sell signals generated. Check training criteria".format(sells.sum()))
 
         self.save_debug_data(future_df)
         self.save_debug_indicators(future_df)
 
-        return entries, exits
+        return buys, sells
 
     def save_debug_data(self, future_df: DataFrame):
 
@@ -896,7 +921,7 @@ class NNBC(IStrategy):
         # the func save_debug_indicators()
 
         dbg_list = [
-            'full_dwt', 'train_entry', 'train_exit',
+            'full_dwt', 'train_buy', 'train_sell',
             'future_gain', 'future_min', 'future_max',
             'profit_min', 'profit_max', 'profit_threshold',
             'loss_min', 'loss_max', 'loss_threshold',
@@ -1002,7 +1027,7 @@ class NNBC(IStrategy):
         """ Mean absolute deviation of a signal """
         return np.mean(np.absolute(d - np.mean(d, axis)), axis)
 
-    # add indicators used by stoploss/custom exit logic
+    # add indicators used by stoploss/custom sell logic
     def add_stoploss_indicators(self, dataframe, pair) -> DataFrame:
         if not pair in self.custom_trade_info:
             self.custom_trade_info[pair] = {}
@@ -1076,6 +1101,12 @@ class NNBC(IStrategy):
             dataframe.reindex()
         return dataframe
 
+    # compress the supplied dataframe
+    def compress_dataframe(self, dataframe: DataFrame) -> DataFrame:
+        if not self.compressor:
+            self.compressor = self.get_compressor(dataframe)
+        return pd.DataFrame(self.compressor.transform(dataframe))
+
     # Normalise a dataframe
     def norm_dataframe(self, dataframe: DataFrame) -> DataFrame:
         self.check_inf(dataframe)
@@ -1125,24 +1156,24 @@ class NNBC(IStrategy):
         return temp
 
     # remove outliers from normalised dataframe
-    def remove_outliers(self, df_norm: DataFrame, entries, exits):
+    def remove_outliers(self, df_norm: DataFrame, buys, sells):
 
         # for col in df_norm.columns.values:
         #     if col != 'date':
         #         df_norm = df_norm[(df_norm[col] <= 3.0)]
         # return df_norm
         df = df_norm.copy()
-        df['%temp_entry'] = entries.copy()
-        df['%temp_exit'] = exits.copy()
+        df['%temp_buy'] = buys.copy()
+        df['%temp_sell'] = sells.copy()
         #
         df2 = df[((df >= -3.0) & (df <= 3.0)).all(axis=1)]
         # df_out = df[~((df >= -3.0) & (df <= 3.0)).all(axis=1)] # for debug
         ndrop = df_norm.shape[0] - df2.shape[0]
         if ndrop > 0:
-            b = df2['%temp_entry'].copy()
-            s = df2['%temp_exit'].copy()
-            df2.drop('%temp_entry', axis=1, inplace=True)
-            df2.drop('%temp_exit', axis=1, inplace=True)
+            b = df2['%temp_buy'].copy()
+            s = df2['%temp_sell'].copy()
+            df2.drop('%temp_buy', axis=1, inplace=True)
+            df2.drop('%temp_sell', axis=1, inplace=True)
             df2.reindex()
             # if self.dbg_verbose:
             print("    Removed ", ndrop, " outliers")
@@ -1152,13 +1183,13 @@ class NNBC(IStrategy):
         else:
             # no outliers, just return originals
             df2 = df_norm
-            b = entries
-            s = exits
+            b = buys
+            s = sells
         return df2, b, s
 
     # build a 'viable' dataframe sample set. Needed because the positive labels are sparse
     # Not entirely sure this works with Neural Nets because they look at sequences
-    def build_viable_dataset(self, size: int, df_norm, entries, exits):
+    def build_viable_dataset(self, size: int, df_norm, buys, sells):
 
         # copy and combine the data into one dataframe
         df = df_norm.copy()
@@ -1166,120 +1197,120 @@ class NNBC(IStrategy):
         df_type = type(df).__name__
         if 'array' in df_type:
             # np.array
-            entry_col = np.shape(df)[1]
-            exit_col = entry_col + 1
-            df = np.hstack((df, np.array(entries).reshape(-1, 1), np.array(exits).reshape(-1, 1)))
+            buy_col = np.shape(df)[1]
+            sell_col = buy_col + 1
+            df = np.hstack((df, np.array(buys).reshape(-1, 1), np.array(sells).reshape(-1, 1)))
 
         else:
             # dataframe
-            df['%temp_entry'] = entries.copy()
-            df['%temp_exit'] = exits.copy()
-            entry_col = df.columns.get_loc('%temp_entry')
-            exit_col = df.columns.get_loc('%temp_exit')
+            df['%temp_buy'] = buys.copy()
+            df['%temp_sell'] = sells.copy()
+            buy_col = df.columns.get_loc('%temp_buy')
+            sell_col = df.columns.get_loc('%temp_sell')
 
         tensor = self.df_to_tensor(df, self.seq_len)
 
         # print("df_norm:{} df:{} tensor:{}".format(np.shape(df_norm), np.shape(df), np.shape(tensor)))
-        # print("entry_col:{} exit_col:{}".format(entry_col, exit_col))
+        # print("buy_col:{} sell_col:{}".format(buy_col, sell_col))
 
-        entry_idx = np.array([], dtype=int)
-        exit_idx = np.array([], dtype=int)
+        buy_idx = np.array([], dtype=int)
+        sell_idx = np.array([], dtype=int)
         nosig_idx = np.array([], dtype=int)
-        entry_tensor = np.array([], dtype=float)
-        exit_tensor = np.array([], dtype=float)
+        buy_tensor = np.array([], dtype=float)
+        sell_tensor = np.array([], dtype=float)
         nosig_tensor = np.array([], dtype=float)
 
-        # identify entries, exits, no signal (probably a fast way to this)
+        # identify buys, sells, no signal (probably a fast way to this)
         for row in range(np.shape(tensor)[0]):
-            if tensor[row][0][entry_col] == 1:
-                entry_idx = np.append(entry_idx, row)
-            if tensor[row][0][exit_col] == 1:
-                exit_idx = np.append(exit_idx, row)
-            if (tensor[row][0][entry_col] == 0) & (tensor[row][0][exit_col] == 0):
+            if tensor[row][0][buy_col] == 1:
+                buy_idx = np.append(buy_idx, row)
+            if tensor[row][0][sell_col] == 1:
+                sell_idx = np.append(sell_idx, row)
+            if (tensor[row][0][buy_col] == 0) & (tensor[row][0][sell_col] == 0):
                 nosig_idx = np.append(nosig_idx, row)
 
-        entry_tensor = tensor[entry_idx].copy()
-        exit_tensor = tensor[exit_idx].copy()
+        buy_tensor = tensor[buy_idx].copy()
+        sell_tensor = tensor[sell_idx].copy()
         nosig_tensor = tensor[nosig_idx].copy()
 
-        num_entries = np.shape(entry_tensor)[0]
-        num_exits = np.shape(exit_tensor)[0]
+        num_buys = np.shape(buy_tensor)[0]
+        num_sells = np.shape(sell_tensor)[0]
         num_nosig = np.shape(nosig_tensor)[0]
-        # print("df:{} num_entries:{} num_exits:{} num_nosig:{}".format(np.shape(tensor)[0], num_entries, num_exits, num_nosig))
+        # print("df:{} num_buys:{} num_sells:{} num_nosig:{}".format(np.shape(tensor)[0], num_buys, num_sells, num_nosig))
 
         # print("raw:")
-        # print("tensor:{} entry_tensor:{}, exit_tensor:{}, nosig_tensor:{}".format(np.shape(tensor),
-        #                                                                         np.shape(entry_tensor),
-        #                                                                         np.shape(exit_tensor),
+        # print("tensor:{} buy_tensor:{}, sell_tensor:{}, nosig_tensor:{}".format(np.shape(tensor),
+        #                                                                         np.shape(buy_tensor),
+        #                                                                         np.shape(sell_tensor),
         #                                                                         np.shape(nosig_tensor)))
-        # print(exit_tensor)
+        # print(sell_tensor)
 
         # DEBUG
-        for row in range(np.shape(exit_tensor)[0]):
-            if entry_tensor[row][0][entry_col] != 1:
-                print("invalid entry entry ({:.2f}) in row {}".format(entry_tensor[row][0][entry_col], row))
-                print(exit_tensor[row][0])
+        for row in range(np.shape(sell_tensor)[0]):
+            if buy_tensor[row][0][buy_col] != 1:
+                print("invalid buy entry ({:.2f}) in row {}".format(buy_tensor[row][0][buy_col], row))
+                print(sell_tensor[row][0])
 
-            if exit_tensor[row][0][exit_col] != 1:
-                print("invalid exit entry ({:.2f}) in row {}".format(exit_tensor[row][0][exit_col], row))
-                print(exit_tensor[row][0])
+            if sell_tensor[row][0][sell_col] != 1:
+                print("invalid sell entry ({:.2f}) in row {}".format(sell_tensor[row][0][sell_col], row))
+                print(sell_tensor[row][0])
 
-            if (nosig_tensor[row][0][entry_col] != 0) & (exit_tensor[row][0][exit_col] != 0):
-                print("invalid nosig entry ({:.2f}) in row {}".format(nosig_tensor[row][0][exit_col], row))
-                print(exit_tensor[row][0])
+            if (nosig_tensor[row][0][buy_col] != 0) & (sell_tensor[row][0][sell_col] != 0):
+                print("invalid nosig entry ({:.2f}) in row {}".format(nosig_tensor[row][0][sell_col], row))
+                print(sell_tensor[row][0])
 
-        # make sure there aren't too many entries & exits
-        # We are aiming for a roughly even split between entries, exits, and 'no signal' (no entry or exit)
+        # make sure there aren't too many buys & sells
+        # We are aiming for a roughly even split between buys, sells, and 'no signal' (no buy or sell)
         max_signals = int(2 * size / 3)
-        if ((num_entries + num_exits) > max_signals):
+        if ((num_buys + num_sells) > max_signals):
             # both exceed max?
             sig_size = int(size / 3)
-            if (num_entries > sig_size) & (num_exits > sig_size):
-                # resize both entry & exit to 1/3 of requested size
-                entry_tensor, _ = train_test_split(entry_tensor, train_size=sig_size, shuffle=True)
-                exit_tensor, _ = train_test_split(exit_tensor, train_size=sig_size, shuffle=True)
+            if (num_buys > sig_size) & (num_sells > sig_size):
+                # resize both buy & sell to 1/3 of requested size
+                buy_tensor, _ = train_test_split(buy_tensor, train_size=sig_size, shuffle=True)
+                sell_tensor, _ = train_test_split(sell_tensor, train_size=sig_size, shuffle=True)
             else:
                 # only one them is too big, so figure out which
-                if (num_entries > num_exits):
-                    entry_tensor, _ = train_test_split(entry_tensor, train_size=max_signals - num_exits, shuffle=True)
+                if (num_buys > num_sells):
+                    buy_tensor, _ = train_test_split(buy_tensor, train_size=max_signals - num_sells, shuffle=True)
                 else:
-                    exit_tensor, _ = train_test_split(exit_tensor, train_size=max_signals - num_entries, shuffle=True)
+                    sell_tensor, _ = train_test_split(sell_tensor, train_size=max_signals - num_buys, shuffle=True)
 
         # extract enough rows to fill the requested size
-        fill_size = size - min(num_entries, int(size / 3)) - min(num_exits, int(size / 3))
+        fill_size = size - min(num_buys, int(size / 3)) - min(num_sells, int(size / 3))
         nosig_tensor, _ = train_test_split(nosig_tensor, train_size=fill_size, shuffle=True)
-        # print("viable df - entries:{} exits:{} fill:{}".format(df_entry.shape[0], df_exit.shape[0], df_nosig.shape[0]))
+        # print("viable df - buys:{} sells:{} fill:{}".format(df_buy.shape[0], df_sell.shape[0], df_nosig.shape[0]))
 
         # concatenate the arrays
-        t2 = np.concatenate((entry_tensor, exit_tensor, nosig_tensor))
+        t2 = np.concatenate((buy_tensor, sell_tensor, nosig_tensor))
 
-        # shuffle rows, so that entries, exits & nothing are intermixed
+        # shuffle rows, so that buys, sells & nothing are intermixed
         np.random.shuffle(t2)
         # np.random.shuffle(t2)
 
         # print("trimmed:")
-        # print("entry_tensor:{}, exit_tensor:{}, nosig_tensor:{} t2:{}".format(np.shape(entry_tensor),
-        #                                                                     np.shape(exit_tensor),
+        # print("buy_tensor:{}, sell_tensor:{}, nosig_tensor:{} t2:{}".format(np.shape(buy_tensor),
+        #                                                                     np.shape(sell_tensor),
         #                                                                     np.shape(nosig_tensor),
         #                                                                     np.shape(t2)))
         # print(t2)
 
-        # separate out the data, entries & exits
-        b = t2[:, :, entry_col].copy()
-        s = t2[:, :, exit_col].copy()
+        # separate out the data, buys & sells
+        b = t2[:, :, buy_col].copy()
+        s = t2[:, :, sell_col].copy()
 
         # print("b:{:.0f} s:{:.0f}".format(b[:, 0].sum(), s[:, 0].sum()))
 
         t3 = np.zeros((np.shape(t2)[0], np.shape(t2)[1], np.shape(t2)[2] - 2), dtype=float)
         for row in range(np.shape(t2)[0]):
             for seq in range(np.shape(t2)[1]):
-                features = np.delete(t2[row][seq], [entry_col, exit_col])
+                features = np.delete(t2[row][seq], [buy_col, sell_col])
                 t3[row][seq] = features
 
         return t3, b, s
 
     # build a dataset that mimics 'live' runs
-    def build_standard_dataset(self, size: int, df_norm: DataFrame, entries, exits):
+    def build_standard_dataset(self, size: int, df_norm: DataFrame, buys, sells):
 
         # constrain size to what will be available in run modes
         # df_size = df_norm.shape[0]
@@ -1302,14 +1333,14 @@ class NNBC(IStrategy):
             # use the front part of the data
             start = 0
         elif test_option == 3:
-            # search entries array to find window with most entries? Cheating?!
+            # search buys array to find window with most buys? Cheating?!
             start = 0
             num_iter = df_size - data_size
             if num_iter > 0:
-                max_entries = 0
+                max_buys = 0
                 for i in range(num_iter):
-                    num_entries = entries[i:i + data_size - 1].sum()
-                    if num_entries > max_entries:
+                    num_buys = buys[i:i + data_size - 1].sum()
+                    if num_buys > max_buys:
                         start = i
         else:
             # take the end  (better fit for recent data)
@@ -1327,19 +1358,19 @@ class NNBC(IStrategy):
 
         # convert dataframe to tensor before extracting train/test data (avoid edge effects)
         tensor = self.df_to_tensor(df_norm, self.seq_len)
-        entry_tensor = self.df_to_tensor(np.array(entries).reshape(-1, 1), self.seq_len)
-        exit_tensor = self.df_to_tensor(np.array(exits).reshape(-1, 1), self.seq_len)
+        buy_tensor = self.df_to_tensor(np.array(buys).reshape(-1, 1), self.seq_len)
+        sell_tensor = self.df_to_tensor(np.array(sells).reshape(-1, 1), self.seq_len)
 
         # extract desired rows
         t = tensor[start:start + data_size]
-        b = entry_tensor[start:start + data_size]
-        s = exit_tensor[start:start + data_size]
+        b = buy_tensor[start:start + data_size]
+        s = sell_tensor[start:start + data_size]
 
         return t, b, s
 
-    # splits the data, entries & exits into train & test
+    # splits the data, buys & sells into train & test
     # this sort of emulates train_test_split, but with different options for selecting data
-    def split_data(self, tensor, entries, exits, ratio):
+    def split_data(self, tensor, buys, sells, ratio):
 
         # constrain size to what will be available in run modes
         # df_size = df_norm.shape[0]
@@ -1400,20 +1431,20 @@ class NNBC(IStrategy):
 
         # extract desired rows
         train_tensor = tensor[train_start:train_start + train_size]
-        train_entries_tensor = entries[train_result_start:train_result_start + train_size]
-        train_exits_tensor = exits[train_result_start:train_result_start + train_size]
+        train_buys_tensor = buys[train_result_start:train_result_start + train_size]
+        train_sells_tensor = sells[train_result_start:train_result_start + train_size]
 
         test_tensor = tensor[test_start:test_start + test_size]
-        test_entries_tensor = entries[test_result_start:test_result_start + test_size]
-        test_exits_tensor = exits[test_result_start:test_result_start + test_size]
+        test_buys_tensor = buys[test_result_start:test_result_start + test_size]
+        test_sells_tensor = sells[test_result_start:test_result_start + test_size]
 
-        num_entries = train_entries_tensor[:, 0].sum()
-        num_exits = train_exits_tensor[:, 0].sum()
-        if (num_entries <= 2) or (num_exits <= 2):
-            print("   WARNING - low number of entries/exits in training data")
-            print("   training #entries:{} #exits:{} ".format(num_entries, num_exits))
+        num_buys = train_buys_tensor[:, 0].sum()
+        num_sells = train_sells_tensor[:, 0].sum()
+        if (num_buys <= 2) or (num_sells <= 2):
+            print("   WARNING - low number of buys/sells in training data")
+            print("   training #buys:{} #sells:{} ".format(num_buys, num_sells))
 
-        return train_tensor, test_tensor, train_entries_tensor, test_entries_tensor, train_exits_tensor, test_exits_tensor
+        return train_tensor, test_tensor, train_buys_tensor, test_buys_tensor, train_sells_tensor, test_sells_tensor
 
     # map column into [0,1]
     def get_binary_labels(self, col):
@@ -1425,33 +1456,20 @@ class NNBC(IStrategy):
 
     # train the PCA reduction and classification models
 
-    def train_models(self, curr_pair, dataframe: DataFrame, entries, exits):
+    def train_models(self, curr_pair, dataframe: DataFrame, buys, sells):
 
-        # only run if interval reaches 0 (no point retraining every camdle)
-        count = self.pair_model_info[curr_pair]['interval']
-        if (count > 0):
-            self.pair_model_info[curr_pair]['interval'] = count - 1
+        if self.dp.runmode.value not in ('backtest'):
             return
-        else:
-            # reset interval to a random number between 1 and the amount of lookahead
-            # self.pair_model_info[curr_pair]['interval'] = random.randint(1, self.curr_lookahead)
-            self.pair_model_info[curr_pair]['interval'] = random.randint(2, max(12, self.curr_lookahead))
-
-        # Reset models for this pair. Makes it safe to just return on error
-        self.pair_model_info[curr_pair]['clf_entry_name'] = ""
-        self.pair_model_info[curr_pair]['clf_entry'] = None
-        self.pair_model_info[curr_pair]['clf_exit_name'] = ""
-        self.pair_model_info[curr_pair]['clf_exit'] = None
 
         # check input - need at least 2 samples or classifiers will not train
-        if entries.sum() < 2:
-            print("*** ERR: insufficient entries in expected results. Check training data")
-            # print(entries)
+        if buys.sum() < 2:
+            print("*** ERR: insufficient buys in expected results. Check training data")
+            # print(buys)
             return
 
-        if exits.sum() < 2:
-            print("*** ERR: insufficient exits in expected results. Check training data")
-            return
+        # if sells.sum() < 2:
+        #     print("*** ERR: insufficient sells in expected results. Check training data")
+        #     return
 
         rand_st = 27  # use fixed number for reproducibility
 
@@ -1459,10 +1477,17 @@ class NNBC(IStrategy):
         if remove_outliers:
             # norm dataframe before splitting, otherwise variances are skewed
             full_df_norm = self.norm_dataframe(dataframe)
-            full_df_norm, entries, exits = self.remove_outliers(full_df_norm, entries, exits)
+            full_df_norm, buys, sells = self.remove_outliers(full_df_norm, buys, sells)
         else:
             # full_df_norm = self.norm_dataframe(dataframe).clip(lower=-3.0, upper=3.0)  # supress outliers
             full_df_norm = self.norm_dataframe(dataframe)
+
+
+        # compress data
+        if self.compress_data:
+            old_size = full_df_norm.shape[1]
+            full_df_norm = self.compress_dataframe(full_df_norm)
+            print("    Compressed data {} -> {} (features)".format(old_size, full_df_norm.shape[1]))
 
         # constrain size to what will be available in run modes
         if self.use_full_dataset:
@@ -1474,179 +1499,134 @@ class NNBC(IStrategy):
         # Note: this returns tensors, not dataframes
 
         if self.cherrypick_data:
-            # get 'viable' data set (includes all entries/exits)
-            v_tensor, v_entries, v_exits = self.build_viable_dataset(data_size, full_df_norm, entries, exits)
+            # get 'viable' data set (includes all buys/sells)
+            v_tensor, v_buys, v_sells = self.build_viable_dataset(data_size, full_df_norm, buys, sells)
         else:
-            v_tensor, v_entries, v_exits = self.build_standard_dataset(data_size, full_df_norm, entries, exits)
+            v_tensor, v_buys, v_sells = self.build_standard_dataset(data_size, full_df_norm, buys, sells)
 
-        tsr_train, tsr_test, train_entries, test_entries, train_exits, test_exits, = self.split_data(v_tensor, v_entries,
-                                                                                               v_exits, 0.8)
+        tsr_train, tsr_test, train_buys, test_buys, train_sells, test_sells, = self.split_data(v_tensor, v_buys,
+                                                                                               v_sells, 0.8)
 
-        num_entries = int(train_entries[:, 0].sum())
-        num_exits = int(train_exits[:, 0].sum())
+        num_buys = int(train_buys[:, 0].sum())
+        num_sells = int(train_sells[:, 0].sum())
 
         if self.dbg_verbose:
             # print("     df_norm:", df_norm.shape, ' v_tensor:', v_tensor.shape)
             print("     tensor:", v_tensor.shape, ' -> train:', tsr_train.shape, " + test:", tsr_test.shape)
-            print("     entries:", v_entries.shape, ' -> train:', train_entries.shape, " + test:", test_entries.shape)
-            print("     exits:", v_exits.shape, ' -> train:', train_exits.shape, " + test:", test_exits.shape)
+            print("     buys:", v_buys.shape, ' -> train:', train_buys.shape, " + test:", test_buys.shape)
+            print("     sells:", v_sells.shape, ' -> train:', train_sells.shape, " + test:", test_sells.shape)
 
-        print("    #training samples:", len(tsr_train), " #entries:", num_entries, ' #exits:', num_exits)
+        print("    #training samples:", len(tsr_train), " #buys:", num_buys, ' #sells:', num_sells)
 
-        # TODO: if low number of entries/exits, try k-fold sampling
+        # TODO: if low number of buys/sells, try k-fold sampling
 
-        entry_labels = self.get_binary_labels(entries)
-        exit_labels = self.get_binary_labels(exits)
-        # train_entry_labels = self.get_binary_labels(train_entries)
-        # train_exit_labels = self.get_binary_labels(train_exits)
-        # test_entry_labels = self.get_binary_labels(test_entries)
-        # test_exit_labels = self.get_binary_labels(test_exits)
+        buy_labels = self.get_binary_labels(buys)
+        sell_labels = self.get_binary_labels(sells)
+        # train_buy_labels = self.get_binary_labels(train_buys)
+        # train_sell_labels = self.get_binary_labels(train_sells)
+        # test_buy_labels = self.get_binary_labels(test_buys)
+        # test_sell_labels = self.get_binary_labels(test_sells)
 
-        train_entry_labels = train_entries
-        train_exit_labels = train_exits
-        test_entry_labels = test_entries
-        test_exit_labels = test_exits
+        train_buy_labels = train_buys
+        train_sell_labels = train_sells
+        test_buy_labels = test_buys
+        test_sell_labels = test_sells
 
-        # Create entry/exit classifiers for the model
+        # Create buy/sell classifiers for the model
 
         # check that we have enough positives to train
-        entry_ratio = 100.0 * (num_entries / len(train_entries))
-        if (entry_ratio < 0.5):
-            print("*** ERR: insufficient number of positive entry labels ({:.2f}%)".format(entry_ratio))
-            return
-
-        entry_clf, entry_clf_name = self.get_entry_classifier(tsr_train, train_entry_labels, tsr_test, test_entry_labels)
-
-        exit_ratio = 100.0 * (num_exits / len(train_exits))
-        # if (exit_ratio < 0.5):
-        #     print("*** ERR: insufficient number of positive exit labels ({:.2f}%)".format(exit_ratio))
+        buy_ratio = 100.0 * (num_buys / len(train_buys))
+        # if (buy_ratio < 0.5):
+        #     print("*** ERR: insufficient number of positive buy labels ({:.2f}%)".format(buy_ratio))
         #     return
 
-        exit_clf, exit_clf_name = self.get_exit_classifier(tsr_train, train_exit_labels, tsr_test, test_exit_labels)
+        buy_clf, buy_clf_name = self.get_buy_classifier(tsr_train, train_buy_labels, tsr_test, test_buy_labels)
+
+        sell_ratio = 100.0 * (num_sells / len(train_sells))
+        # if (sell_ratio < 0.5):
+        #     print("*** ERR: insufficient number of positive sell labels ({:.2f}%)".format(sell_ratio))
+        #     return
+
+        sell_clf, sell_clf_name = self.get_sell_classifier(tsr_train, train_sell_labels, tsr_test, test_sell_labels)
 
         # save the models
-
-        self.pair_model_info[curr_pair]['clf_entry_name'] = entry_clf_name
-        self.pair_model_info[curr_pair]['clf_entry'] = entry_clf
-        self.pair_model_info[curr_pair]['clf_exit_name'] = exit_clf_name
-        self.pair_model_info[curr_pair]['clf_exit'] = exit_clf
+        self.buy_classifier = buy_clf
+        self.sell_classifier = sell_clf
 
         # if scan specified, test against the test dataframe
         if self.dbg_test_classifier:
 
-            if not (entry_clf is None):
-                pred_entries = self.get_classifier_predictions(entry_clf, tsr_test)
+            if not (buy_clf is None):
+                pred_buys = self.get_classifier_predictions(buy_clf, tsr_test)
                 print("")
-                print("Testing entry Classifier (", entry_clf_name, ")")
-                print(classification_report(test_entry_labels[:, 0], pred_entries))
+                print("Testing Buy Classifier (", buy_clf_name, ")")
+                print(classification_report(test_buy_labels[:, 0], pred_buys))
                 print("")
 
-            if not (exit_clf is None):
-                pred_exits = self.get_classifier_predictions(exit_clf, tsr_test)
+            if not (sell_clf is None):
+                pred_sells = self.get_classifier_predictions(sell_clf, tsr_test)
                 print("")
-                print("Testing exit Classifier (", exit_clf_name, ")")
-                print(classification_report(test_exit_labels[:, 0], pred_exits))
+                print("Testing Sell Classifier (", sell_clf_name, ")")
+                print(classification_report(test_sell_labels[:, 0], pred_sells))
                 print("")
 
     # get a classifier for the supplied normalised dataframe and known results
-    def get_entry_classifier(self, tensor, results, test_tensor, test_labels):
+    def get_buy_classifier(self, tensor, results, test_tensor, test_labels):
 
         clf = None
-        name = ""
+        name = self.classifier_name
+
         # labels = self.get_binary_labels(results)
         labels = results
 
-        if results.sum() <= 2:
-            print("***")
-            print("*** ERR: insufficient positive results in entry data")
-            print("***")
-            return clf, name
+        # if results.sum() <= 2:
+        #     print("***")
+        #     print("*** ERR: insufficient positive results in buy data")
+        #     print("***")
+        #     return clf, name
 
-        # If already done, just get previous result and re-fit
-        if self.pair_model_info[self.curr_pair]['clf_entry']:
-            clf = self.pair_model_info[self.curr_pair]['clf_entry']
-            name = self.pair_model_info[self.curr_pair]['clf_entry_name']
-            clf = self.fit_classifier(clf, name, self.entry_tag, tensor, labels, test_tensor, test_labels)
-        else:
-            if self.dbg_scan_classifiers:
-                if self.dbg_verbose:
-                    print("    Finding best entry classifier:")
-                clf, name = self.find_best_classifier(tensor, labels, tag="entry")
+        if self.dp.runmode.value in ('backtest'):
+            # If already done, just  re-fit
+            if self.buy_classifier:
+                clf = self.fit_classifier(clf, name, self.buy_tag, tensor, labels, test_tensor, test_labels)
             else:
-                clf, name = self.classifier_factory(self.default_classifier, tensor, labels)
-                clf = self.fit_classifier(clf, name, self.entry_tag, tensor, labels, test_tensor, test_labels)
+                clf, name = self.classifier_factory(self.classifier_name, tensor, labels)
+                clf = self.fit_classifier(clf, name, self.buy_tag, tensor, labels, test_tensor, test_labels)
 
         return clf, name
 
     # get a classifier for the supplied normalised dataframe and known results
-    def get_exit_classifier(self, tensor, results, test_tensor, test_labels):
+    def get_sell_classifier(self, tensor, results, test_tensor, test_labels):
 
         clf = None
-        name = ""
+        name = self.classifier_name
         # labels = self.get_binary_labels(results)
         labels = results
 
-        if results.sum() <= 2:
-            print("***")
-            print("*** ERR: insufficient positive results in exit data")
-            print("***")
-            return clf, name
+        # if results.sum() <= 2:
+        #     print("***")
+        #     print("*** ERR: insufficient positive results in sell data")
+        #     print("***")
+        #     return clf, name
 
-        # If already done, just get previous result and re-fit
-        if self.pair_model_info[self.curr_pair]['clf_exit']:
-            clf = self.pair_model_info[self.curr_pair]['clf_exit']
-            name = self.pair_model_info[self.curr_pair]['clf_exit_name']
-            clf = self.fit_classifier(clf, name, self.exit_tag, tensor, labels, test_tensor, test_labels)
-
-        else:
-            if self.dbg_scan_classifiers:
-                if self.dbg_verbose:
-                    print("    Finding best exit classifier:")
-                clf, name = self.find_best_classifier(tensor, labels, tag="exit")
+        if self.dp.runmode.value in ('backtest'):
+            # If already done, just  re-fit
+            if self.sell_classifier:
+                clf = self.fit_classifier(clf, name, self.sell_tag, tensor, labels, test_tensor, test_labels)
             else:
-                clf, name = self.classifier_factory(self.default_classifier, tensor, labels)
-                clf = self.fit_classifier(clf, name, self.exit_tag, tensor, labels, test_tensor, test_labels)
+                clf, name = self.classifier_factory(self.classifier_name, tensor, labels)
+                clf = self.fit_classifier(clf, name, self.sell_tag, tensor, labels, test_tensor, test_labels)
 
         return clf, name
 
-    # default classifier
-    default_classifier = 'Multihead'  # select based on testing
-
-    # list of potential classifier types - set to the list that you want to compare
-    classifier_list = [
-        # 'MLP', 'LSTM', 'Attention', 'Multihead'
-        'MLP', 'MLP2', 'LSTM', 'Multihead'
-    ]
-
-    # factory to create classifier based on name
-    def classifier_factory(self, name, tensor, labels):
-        clf = None
-
-        # nfeatures = df_norm.shape[1]
-
-        nfeatures = np.shape(tensor)[2]
-
-        if name == 'MLP':
-            clf = self.build_model_MLP(nfeatures, self.seq_len)
-        elif name == 'MLP2':
-            clf = self.build_model_MLP2(nfeatures, self.seq_len)
-        elif name == 'LSTM':
-            clf = self.build_model_LSTM(nfeatures, self.seq_len)
-        elif name == 'LSTM2':
-            clf = self.build_model_LSTM2(nfeatures, self.seq_len)
-        elif name == 'Attention':
-            clf = self.build_model_Attention(nfeatures, self.seq_len)
-        elif name == 'Multihead':
-            clf = self.build_model_Multihead(nfeatures, self.seq_len)
-        elif name == 'RBM':
-            clf = self.build_model_RBM(nfeatures, self.seq_len)
-
-        else:
-            print("Unknown classifier: ", name)
-            clf = None
-        return clf, name
 
     #######################################
+
+    def get_compressor(self, df_norm: DataFrame):
+        # just use fixed size PCA (easier for classifiers to deal with)
+        ncols = 64
+        compressor = skd.PCA(n_components=ncols, whiten=True, svd_solver='full').fit(df_norm)
+        return compressor
 
     # get a scaler for scaling/normalising the data (in a func because I change it routinely)
     def get_scaler(self):
@@ -1699,23 +1679,31 @@ class NNBC(IStrategy):
 
     #######################################
 
-    def get_checkpoint_path(self, tag):
-        # Note that keras expects it to be called 'checkpoint'
+    def get_checkpoint_path(self, clf_name, tag):
         checkpoint_dir = '/tmp'
         curr_class = self.__class__.__name__
-        checkpoint_path = checkpoint_dir + "/" + curr_class + "/" + tag + self.curr_pair.replace("/", "_") + "/checkpoint"
+        # checkpoint_path = checkpoint_dir + "/" + curr_class + "/" + tag + self.curr_pair.replace("/", "_") + "/checkpoint"
+        if self.compress_data:
+            checkpoint_path = checkpoint_dir + "/" + curr_class + "/" + clf_name + "_" + tag + "_cmp" + "/checkpoint.h5"
+        else:
+            checkpoint_path = checkpoint_dir + "/" + curr_class + "/" + clf_name + "_" + tag + "/checkpoint.h5"
 
         return checkpoint_path
 
-    def get_model_path(self, tag):
-        model_dir = '/tmp'
+    def get_model_path(self, clf_name, tag):
         curr_class = self.__class__.__name__
-        model_path = model_dir + "/" + curr_class + "/" + tag + self.curr_pair.replace("/", "_") + ".h5"
+        model_dir = './models/' + curr_class + "/"
+        # model_path = model_dir + tag + self.curr_pair.replace("/", "_") + ".h5"
+        if self.compress_data:
+            model_path = model_dir + curr_class + "_" + clf_name + "_" + tag + "_cmp" + ".h5"
+        else:
+            model_path = model_dir + curr_class + "_" + clf_name + "_" + tag  + ".h5"
 
         return model_path
 
-    def load_model(self, model, tag):
-        model_path = self.get_model_path(tag)
+    def load_model(self, clf_name, tag):
+        model = None
+        model_path = self.get_model_path(clf_name, tag)
 
         # load saved model if present
         if os.path.exists(model_path):
@@ -1730,14 +1718,16 @@ class NNBC(IStrategy):
             except Exception as e:
                 print("    ", str(e))
                 print("    Error loading model from {}. Check whether model format changed".format(model_path))
+                self.is_trained = False
         else:
             print("    model not found ({})...".format(model_path))
+            self.is_trained = False
 
         return model
 
     def get_model_weights(self, model, clf_name, tag):
 
-        model_name = self.get_checkpoint_path(tag)
+        model_name = self.get_checkpoint_path(clf_name, tag)
 
         # if checkpoint already exists, load it as a starting point
         if os.path.exists(model_name):
@@ -1748,28 +1738,41 @@ class NNBC(IStrategy):
                 print("Error loading weights from {}. Check whether model format changed".format(model_name))
         else:
             print("    model not found ({})...".format(model_name))
-            if self.dp.runmode.value not in ('hyperopt', 'backtest', 'plot'):
+            if self.dp.runmode.value not in ('backtest'):
                 print("*** ERR: no existing model. You should run backtest first!")
         return model
 
     def fit_classifier(self, classifier, name, tag, tensor, labels, test_tensor, test_labels):
 
         # load existing model, if it exists
-        checkpoint = self.get_checkpoint_path(tag)
+        checkpoint = self.get_checkpoint_path(name, tag)
 
-        if self.preload_model:
-            # classifier = self.get_model_weights(classifier, checkpoint, tag)
-            classifier = self.load_model(classifier, tag)
+        classifier = self.load_model(name, tag)
 
-        #TODO: just return if loaded (need flag per classifier)
+        # print("is_trained:{} refit_model:{}".format(self.is_trained, self.refit_model))
+        if (classifier is not None) and self.is_trained and (not self.refit_model):
+            print("    Using loaded model...")
+            return classifier
 
-        # print("    fit_classifier() tensor:{} labels:{}".format(np.shape(tensor), np.shape(labels)))
+        if classifier is None:
+            classifier, _ = self.classifier_factory(name, tensor, labels)
+
+        if classifier is None:
+            print("    Could not create classifier")
+            return None
+
+        num_samples = np.shape(tensor)[0]
+        num_events = labels[:, 0, 0].sum()
+        exp_acc = (num_samples - num_events) / num_samples
+        print("    train: samples:{} events:{} exp. acc:{:.4f}".format(num_samples, num_events, exp_acc))
 
         # callback to control early exit on plateau of results
         early_callback = keras.callbacks.EarlyStopping(
             monitor="loss",
             mode="min",
-            patience=9,
+            min_delta=0.0001,
+            patience=6,
+            restore_best_weights = True,
             verbose=0)
 
         plateau_callback = keras.callbacks.ReduceLROnPlateau(
@@ -1783,7 +1786,8 @@ class NNBC(IStrategy):
         # Note that we use validation loss as the metric, not training loss
         checkpoint_callback = keras.callbacks.ModelCheckpoint(
             filepath=checkpoint,
-            save_weights_only=True,
+            # save_weights_only=True,
+            save_weights_only=False,
             monitor='loss',
             mode='min',
             save_best_only=True,
@@ -1792,7 +1796,8 @@ class NNBC(IStrategy):
         # df_tensor = np.reshape(df_tensor, (np.shape(df_tensor)[0], np.shape(df_tensor)[1], np.shape(df_tensor)[2]))
         # lbl_tensor = np.array(lbl_tensor).reshape(np.shape(df_tensor)[0], np.shape(df_tensor)[1], np.shape(df_tensor)[2]))
 
-        print("    training {} model: {}...".format(tag, name))
+        print("    training {} classifier: {}...".format(tag, name))
+
         # Model weights are saved at the end of every epoch, if it's the best seen so far.
         fhis = classifier.fit(tensor, labels,
                               batch_size=self.batch_size,
@@ -1801,11 +1806,13 @@ class NNBC(IStrategy):
                               validation_data=(test_tensor, test_labels),
                               verbose=1)
 
-        # The model weights (that are considered the best) are loaded into th model.
-        classifier = self.get_model_weights(classifier, checkpoint, tag)
+        # # The model weights (that are considered the best) are loaded into th model.
+        # classifier = self.get_model_weights(classifier, name, tag)
 
         # save the model
-        keras.models.save_model(classifier, filepath=self.get_model_path(tag))
+        keras.models.save_model(classifier, filepath=self.get_model_path(name, tag))
+
+        self.is_trained = True
 
         return classifier
 
@@ -1829,6 +1836,10 @@ class NNBC(IStrategy):
         preds = np.array(preds[:, 0]).reshape(-1, 1)
         preds = preds[:, 0]
 
+        nz_preds = preds[preds > 0.001]
+        if len(nz_preds == 0):
+            nz_preds = preds
+
         # convert softmax result into a binary value
         # predictions = np.argmax(preds) # softmax output
         # predictions = tf.round(tf.nn.sigmoid(preds)) # linear output
@@ -1836,20 +1847,59 @@ class NNBC(IStrategy):
         # it looks like (sometimes) the predictions are scaled down, so cheat a little and use a threshold based on the
         # mean and standard deviation
         # TODO: figure out scaling factor based on dataframe normalisation
-        if preds.max() > 0.5:
+        if preds.max() > 0.75:
+            threshold = 0.75
+        elif preds.max() > 0.5:
             threshold = 0.5
         else:
-            threshold = preds.mean() + 2.0 * preds.std()
+            threshold = nz_preds.mean() + 2.0 * nz_preds.std()
+        threshold = max(threshold, 0.8)
+
         predictions = np.where(preds > threshold, 1.0, 0.0)  # sigmoid output
 
-        # print("preds sum:{} mean: {:.4f} min: {:.4f} max: {:.4f} std: {:.4f}".format(predictions.sum(),
-        #                                                                              preds.mean(),
-        #                                                                              preds.min(),
-        #                                                                              preds.max(),
-        #                                                                              preds.std()
+        # print("preds events:{} mean: {:.4f} min: {:.4f} max: {:.4f} std: {:.4f}".format(len(nz_preds),
+        #                                                                              nz_preds.mean(),
+        #                                                                              nz_preds.min(),
+        #                                                                              nz_preds.max(),
+        #                                                                              nz_preds.std()
         #                                                                              ))
-
         return predictions
+
+    #################################
+
+    # list of potential classifier types - set to the list that you want to compare
+    classifier_list = [
+        # 'MLP', 'LSTM', 'Attention', 'Multihead'
+        'MLP', 'MLP2', 'LSTM', 'Multihead', 'Transformer'
+    ]
+
+    # factory to create classifier based on name
+    def classifier_factory(self, name, tensor, labels):
+        clf = None
+
+        nfeatures = np.shape(tensor)[2]
+
+        if name == 'MLP':
+            clf = self.build_model_MLP(nfeatures, self.seq_len)
+        elif name == 'MLP2':
+            clf = self.build_model_MLP2(nfeatures, self.seq_len)
+        elif name == 'LSTM':
+            clf = self.build_model_LSTM(nfeatures, self.seq_len)
+        elif name == 'LSTM2':
+            clf = self.build_model_LSTM2(nfeatures, self.seq_len)
+        elif name == 'Attention':
+            clf = self.build_model_Attention(nfeatures, self.seq_len)
+        elif name == 'Multihead':
+            clf = self.build_model_Multihead(nfeatures, self.seq_len)
+        elif name == 'Transformer':
+            clf = self.build_model_Transformer(nfeatures, self.seq_len)
+        elif name == 'RBM':
+            clf = self.build_model_RBM(nfeatures, self.seq_len)
+
+        else:
+            print("Unknown classifier: ", name)
+            clf = None
+        return clf, name
 
     # Classifier Models
 
@@ -1926,11 +1976,15 @@ class NNBC(IStrategy):
 
         model = keras.Sequential()
 
-        # model.add(layers.LSTM(128, return_sequences=True, input_shape=(seq_len, nfeatures)))
-        model.add(layers.LSTM(128, input_shape=(seq_len, nfeatures)))
-        model.add(layers.Dropout(rate=0.1))
-        model.add(layers.LSTM(64))
-        model.add(layers.Dropout(rate=0.1))
+        # model.add(layers.LSTM(64, return_sequences=True, input_shape=(seq_len, nfeatures)))
+        model.add(layers.LSTM(64, activation='tanh', return_sequences=True, input_shape=(seq_len, nfeatures)))
+        model.add(layers.Dropout(rate=0.2))
+        model.add(layers.LSTM(64, return_sequences=True, activation='tanh'))
+        model.add(layers.Dropout(rate=0.2))
+        model.add(layers.LSTM(32, return_sequences=True, activation='tanh'))
+        model.add(layers.Dropout(rate=0.2))
+        model.add(layers.LSTM(16, return_sequences=True, activation='tanh'))
+        model.add(layers.Dropout(rate=0.2))
 
         # model.add(layers.Dense(1, activation='linear'))
         model.add(layers.Dense(1, activation='sigmoid'))
@@ -2002,6 +2056,60 @@ class NNBC(IStrategy):
                       metrics=['accuracy', 'mse'])
         return model
 
+    def transformer_encoder(self, inputs, head_size, num_heads, dropout, ff_dim):
+
+        # Normalization and Attention
+        x = layers.LayerNormalization(epsilon=1e-6)(inputs)
+        x = layers.MultiHeadAttention(key_dim=head_size, num_heads=num_heads, dropout=dropout)(x, x)
+        x = layers.Dropout(dropout)(x)
+
+        res = x + inputs
+
+        # Feed Forward Part
+        x = layers.LayerNormalization(epsilon=1e-6)(res)
+        x = layers.Conv1D(filters=ff_dim, kernel_size=1, activation="relu")(x)
+        x = layers.Dropout(dropout)(x)
+        # x = layers.Conv1D(filters=inputs.shape[-1], kernel_size=1)(x)
+        x = layers.Conv1D(filters=head_size, kernel_size=1)(x)
+        return x + res
+
+    def  build_model_Transformer(self, nfeatures: int, seq_len: int):
+
+        # head_size = 256
+        head_size = nfeatures
+        num_heads = 4
+        # ff_dim = 4
+        ff_dim = seq_len
+        num_transformer_blocks = 4
+        mlp_units = [128]
+        mlp_dropout = 0.4
+        dropout = 0.25
+
+        inputs = keras.Input(shape=(seq_len, nfeatures))
+        x = inputs
+        for _ in range(num_transformer_blocks):
+            x = self.transformer_encoder(x, head_size, num_heads, dropout, ff_dim)
+
+        x = layers.GlobalAveragePooling1D(keepdims=True, data_format="channels_first")(x)
+        for dim in mlp_units:
+            # x = layers.Dense(dim, activation="relu")(x)
+            x = layers.Dense(dim)(x)
+            x = layers.Dropout(mlp_dropout)(x)
+
+        # output layer
+        # x = layers.Dense(seq_len)(x)
+        outputs = layers.Dense(1, activation="sigmoid")(x)
+
+        model = keras.Model(inputs, outputs)
+
+        # model.summary()  # helps keep track of which model is running, while making changes
+        opt = keras.optimizers.Adam(learning_rate=0.0001)
+        model.compile(optimizer=opt,
+                      loss='binary_crossentropy',
+                      metrics=['accuracy', 'mse'])
+        return model
+
+
     # Reduced Boltzmann Machine
     def build_model_RBM(self, nfeatures: int, seq_len: int):
 
@@ -2069,14 +2177,14 @@ class NNBC(IStrategy):
             print("    Insufficient +ve (test) results: ", res_test.sum())
             return None, ""
 
-        for cname in self.classifier_list:
-            clf, _ = self.classifier_factory(cname, tsr_train, res_train)
+        for clf_name in self.classifier_list:
+            clf, _ = self.classifier_factory(clf_name, tsr_train, res_train)
 
             if clf is not None:
 
                 # fit to the training data
-                clf_dict[cname] = clf
-                clf = self.fit_classifier(clf, cname, tag, tsr_train, res_train, tsr_test, res_test)
+                clf_dict[clf_name] = clf
+                clf = self.fit_classifier(clf, clf_name, tag, tsr_train, res_train, tsr_test, res_test)
 
                 # assess using the test data. Do *not* use the training data for testing
                 pred_test = self.get_classifier_predictions(clf, tsr_test)
@@ -2085,24 +2193,11 @@ class NNBC(IStrategy):
                 score = f1_score(res_test[:, 0], pred_test, average='macro')
 
                 if self.dbg_verbose:
-                    print("      {0:<20}: {1:.3f}".format(cname, score))
+                    print("      {0:<20}: {1:.3f}".format(clf_name, score))
 
                 if score > best_score:
                     best_score = score
-                    best_classifier = cname
-
-                # update classifier stats
-                if tag:
-                    if not (tag in self.classifier_stats):
-                        self.classifier_stats[tag] = {}
-
-                    if not (cname in self.classifier_stats[tag]):
-                        self.classifier_stats[tag][cname] = {'count': 0, 'score': 0.0, 'selected': 0}
-
-                    curr_count = self.classifier_stats[tag][cname]['count']
-                    curr_score = self.classifier_stats[tag][cname]['score']
-                    self.classifier_stats[tag][cname]['count'] = curr_count + 1
-                    self.classifier_stats[tag][cname]['score'] = (curr_score * curr_count + score) / (curr_count + 1)
+                    best_classifier = clf_name
 
         if best_score <= 0.0:
             print("   No classifier found")
@@ -2116,12 +2211,6 @@ class NNBC(IStrategy):
             print("!!! WARNING: F1 score below threshold ({:.3f})".format(best_score))
             print("!!!")
             return None, ""
-
-        # update stats for selected classifier
-        if tag:
-            if best_classifier in self.classifier_stats[tag]:
-                self.classifier_stats[tag][best_classifier]['selected'] = self.classifier_stats[tag][best_classifier] \
-                                                                              ['selected'] + 1
 
         print("       ", tag, " model selected: ", best_classifier, " Score:{:.3f}".format(best_score))
         # print("")
@@ -2137,6 +2226,9 @@ class NNBC(IStrategy):
         if clf is not None:
             # print("    predicting... - dataframe:", dataframe.shape)
             df_norm = self.norm_dataframe(dataframe)
+            if self.compress_data:
+                df_norm = self.compress_dataframe(df_norm)
+
             df_tensor = self.df_to_tensor(df_norm, self.seq_len)
             predict = self.get_classifier_predictions(clf, df_tensor)
 
@@ -2146,66 +2238,64 @@ class NNBC(IStrategy):
         # print (predict)
         return predict
 
-    def predict_entry(self, df: DataFrame, pair):
-        clf = self.pair_model_info[pair]['clf_entry']
+    def predict_buy(self, df: DataFrame, pair):
+        clf = self.buy_classifier
 
         if clf is None:
-            print("    No entry Classifier for pair ", pair, " -Skipping predictions")
-            self.pair_model_info[pair]['interval'] = min(self.pair_model_info[pair]['interval'], 4)
+            print("    No Buy Classifier for pair ", pair, " -Skipping predictions")
             predict = df['close'].copy()  # just to get the size
             predict = 0.0
             return predict
 
-        print("    predicting entries...")
+        print("    predicting buys...")
         predict = self.predict(df, pair, clf)
 
         # if self.dbg_test_classifier:
         #     # DEBUG: check accuracy
-        #     signals = df['train_entry_signal']
+        #     signals = df['train_buy_signal']
         #     labels = self.get_binary_labels(signals)
         #
         #     if  self.dbg_verbose:
         #         print("")
-        #         print("Predict - entry Signals (", type(clf).__name__, ")")
+        #         print("Predict - Buy Signals (", type(clf).__name__, ")")
         #         print(classification_report(labels, predict))
         #         print("")
         #
         #     score = f1_score(labels, predict, average='macro')
         #     if score <= 0.5:
         #         print("")
-        #         print("!!! WARNING: (entry) F1 score below 51% ({:.3f})".format(score))
+        #         print("!!! WARNING: (buy) F1 score below 51% ({:.3f})".format(score))
         #         print("    Classifier:", type(clf).__name__)
         #         print("")
 
         return predict
 
-    def predict_exit(self, df: DataFrame, pair):
-        clf = self.pair_model_info[pair]['clf_exit']
+    def predict_sell(self, df: DataFrame, pair):
+        clf = self.sell_classifier
         if clf is None:
-            print("    No exit Classifier for pair ", pair, " -Skipping predictions")
-            self.pair_model_info[pair]['interval'] = min(self.pair_model_info[pair]['interval'], 4)
+            print("    No Sell Classifier for pair ", pair, " -Skipping predictions")
             predict = df['close']  # just to get the size
             predict = 0.0
             return predict
 
-        print("    predicting exits...")
+        print("    predicting sells...")
         predict = self.predict(df, pair, clf)
 
         # if self.dbg_test_classifier:
         #     # DEBUG: check accuracy
-        #     signals = df['train_exit_signal']
+        #     signals = df['train_sell_signal']
         #     labels = self.get_binary_labels(signals)
         #
         #     if self.dbg_verbose:
         #         print("")
-        #         print("Predict - exit Signals (", type(clf).__name__, ")")
+        #         print("Predict - Sell Signals (", type(clf).__name__, ")")
         #         print(classification_report(labels, predict))
         #         print("")
         #
         #     score = f1_score(labels, predict, average='macro')
         #     if score <= 0.5:
         #         print("")
-        #         print("!!! WARNING: (entry) F1 score below 51% ({:.3f})".format(score))
+        #         print("!!! WARNING: (buy) F1 score below 51% ({:.3f})".format(score))
         #         print("    Classifier:", type(clf).__name__)
         #         print("")
 
@@ -2229,75 +2319,19 @@ class NNBC(IStrategy):
         return self.curr_state[pair]
 
     def show_debug_info(self, pair):
-        # print("")
-        # print("pair_model_info:")
-        print("  ", pair, ": ", self.pair_model_info[pair])
-        # print("")
+        print("")
 
     def show_all_debug_info(self):
         print("")
-        if (len(self.pair_model_info) > 0):
-            # print("Model Info:")
-            # print("----------")
-            table = PrettyTable(["Pair", "entry Classifier", "exit Classifier"])
-            table.title = "Model Information"
-            table.align = "l"
-            table.reversesort = False
-            table.sortby = 'Pair'
 
-            for pair in self.pair_model_info:
-                table.add_row([pair,
-                               self.pair_model_info[pair]['clf_entry_name'],
-                               self.pair_model_info[pair]['clf_exit_name']
-                               ])
-
-            print(table)
-
-        if len(self.classifier_stats) > 0:
-            # print("Classifier Statistics:")
-            # print("---------------------")
-            print("")
-            if self.entry_tag in self.classifier_stats:
-                print("")
-                table = PrettyTable(["Classifier", "Mean Score", "Selected"])
-                table.title = "entry Classifiers"
-                table.align["Classifier"] = "l"
-                table.align["Mean Score"] = "c"
-                table.float_format = '.4'
-                for cls in self.classifier_stats[self.entry_tag]:
-                    table.add_row([cls,
-                                   self.classifier_stats[self.entry_tag][cls]['score'],
-                                   self.classifier_stats[self.entry_tag][cls]['selected']])
-                table.reversesort = True
-                # table.sortby = 'Mean Score'
-                print(table.get_string(sort_key=operator.itemgetter(2, 1), sortby="Selected"))
-                print("")
-
-            if self.exit_tag in self.classifier_stats:
-                print("")
-                table = PrettyTable(["Classifier", "Mean Score", "Selected"])
-                table.title = "exit Classifiers"
-                table.align["Classifier"] = "l"
-                table.align["Mean Score"] = "c"
-                table.float_format = '.4'
-                for cls in self.classifier_stats[self.exit_tag]:
-                    table.add_row([cls,
-                                   self.classifier_stats[self.exit_tag][cls]['score'],
-                                   self.classifier_stats[self.exit_tag][cls]['selected']])
-                table.reversesort = True
-                # table.sortby = 'Mean Score'
-                print(table.get_string(sort_key=operator.itemgetter(2, 1), sortby="Selected"))
-                print("")
-
-            print("")
 
     ###################################
 
     """
-    entry Signal
+    Buy Signal
     """
 
-    def populate_entry_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
+    def populate_buy_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
         conditions = []
         dataframe.loc[:, 'enter_tag'] = ''
         curr_pair = metadata['pair']
@@ -2317,20 +2351,20 @@ class NNBC(IStrategy):
         conditions.append(dataframe['volume'] > 0)
 
         # MFI
-        conditions.append(dataframe['mfi'] < 20.0)
+        conditions.append(dataframe['mfi'] < 30.0)
 
-        # below TEMA
-        conditions.append(dataframe['close'] < dataframe['tema'])
+        # above TEMA
+        conditions.append(dataframe['dwt'] > dataframe['tema'])
 
 
         # Classifier triggers
         predict_cond = (
-            (qtpylib.crossed_above(dataframe['predict_entry'], 0.5))
+            (qtpylib.crossed_above(dataframe['predict_buy'], 0.5))
         )
         conditions.append(predict_cond)
 
         # add strategy-specific conditions (from subclass)
-        strat_cond = self.get_strategy_entry_conditions(dataframe)
+        strat_cond = self.get_strategy_buy_conditions(dataframe)
         if strat_cond is not None:
             conditions.append(strat_cond)
 
@@ -2338,19 +2372,19 @@ class NNBC(IStrategy):
         dataframe.loc[predict_cond, 'enter_tag'] += 'predict_entry '
 
         if conditions:
-            dataframe.loc[reduce(lambda x, y: x & y, conditions), 'enter_long'] = 1
+            dataframe.loc[reduce(lambda x, y: x & y, conditions), 'buy'] = 1
         else:
-            dataframe['enter_long'] = 0
+            dataframe['buy'] = 0
 
         return dataframe
 
     ###################################
 
     """
-    exit Signal
+    Sell Signal
     """
 
-    def populate_exit_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
+    def populate_sell_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
         conditions = []
         dataframe.loc[:, 'exit_tag'] = ''
         curr_pair = metadata['pair']
@@ -2367,30 +2401,30 @@ class NNBC(IStrategy):
         conditions.append(dataframe['volume'] > 0)
 
         # MFI
-        conditions.append(dataframe['mfi'] > 80.0)
+        conditions.append(dataframe['mfi'] > 70.0)
 
-        # above TEMA
-        conditions.append(dataframe['close'] > dataframe['tema'])
+        # below TEMA
+        conditions.append(dataframe['dwt'] < dataframe['tema'])
 
 
         # PCA triggers
         predict_cond = (
-            qtpylib.crossed_above(dataframe['predict_exit'], 0.5)
+            qtpylib.crossed_above(dataframe['predict_sell'], 0.5)
         )
 
         conditions.append(predict_cond)
 
         # add strategy-specific conditions (from subclass)
-        strat_cond = self.get_strategy_exit_conditions(dataframe)
+        strat_cond = self.get_strategy_sell_conditions(dataframe)
         if strat_cond is not None:
             conditions.append(strat_cond)
 
         dataframe.loc[predict_cond, 'exit_tag'] += 'predict_exit '
 
         if conditions:
-            dataframe.loc[reduce(lambda x, y: x & y, conditions), 'exit_long'] = 1
+            dataframe.loc[reduce(lambda x, y: x & y, conditions), 'sell'] = 1
         else:
-            dataframe['exit_long'] = 0
+            dataframe['sell'] = 0
 
         return dataframe
 
@@ -2414,7 +2448,7 @@ class NNBC(IStrategy):
         if current_profit < self.cstop_max_stoploss.value:
             return 0.01
 
-        # Determine how we exit when we are in a loss
+        # Determine how we sell when we are in a loss
         if current_profit < self.cstop_loss_threshold.value:
             if self.cstop_bail_how.value == 'roc' or self.cstop_bail_how.value == 'any':
                 # Dynamic bailout based on rate of change
@@ -2432,10 +2466,10 @@ class NNBC(IStrategy):
     ###################################
 
     """
-    Custom exit
+    Custom Sell
     """
 
-    def custom_exit(self, pair: str, trade: 'Trade', current_time: 'datetime', current_rate: float,
+    def custom_sell(self, pair: str, trade: 'Trade', current_time: 'datetime', current_rate: float,
                     current_profit: float, **kwargs):
 
         dataframe, _ = self.dp.get_analyzed_dataframe(pair=pair, timeframe=self.timeframe)
@@ -2443,41 +2477,41 @@ class NNBC(IStrategy):
 
         trade_dur = int((current_time.timestamp() - trade.open_date_utc.timestamp()) // 60)
         max_profit = max(0, trade.calc_profit_ratio(trade.max_rate))
-        pullback_value = max(0, (max_profit - self.cexit_pullback_amount.value))
+        pullback_value = max(0, (max_profit - self.csell_pullback_amount.value))
         in_trend = False
 
         # Determine our current ROI point based on the defined type
-        if self.cexit_roi_type.value == 'static':
-            min_roi = self.cexit_roi_start.value
-        elif self.cexit_roi_type.value == 'decay':
-            min_roi = cta.linear_decay(self.cexit_roi_start.value, self.cexit_roi_end.value, 0,
-                                       self.cexit_roi_time.value, trade_dur)
-        elif self.cexit_roi_type.value == 'step':
-            if trade_dur < self.cexit_roi_time.value:
-                min_roi = self.cexit_roi_start.value
+        if self.csell_roi_type.value == 'static':
+            min_roi = self.csell_roi_start.value
+        elif self.csell_roi_type.value == 'decay':
+            min_roi = cta.linear_decay(self.csell_roi_start.value, self.csell_roi_end.value, 0,
+                                       self.csell_roi_time.value, trade_dur)
+        elif self.csell_roi_type.value == 'step':
+            if trade_dur < self.csell_roi_time.value:
+                min_roi = self.csell_roi_start.value
             else:
-                min_roi = self.cexit_roi_end.value
+                min_roi = self.csell_roi_end.value
 
         # Determine if there is a trend
-        if self.cexit_trend_type.value == 'rmi' or self.cexit_trend_type.value == 'any':
+        if self.csell_trend_type.value == 'rmi' or self.csell_trend_type.value == 'any':
             if last_candle['rmi_up_trend'] == 1:
                 in_trend = True
-        if self.cexit_trend_type.value == 'ssl' or self.cexit_trend_type.value == 'any':
+        if self.csell_trend_type.value == 'ssl' or self.csell_trend_type.value == 'any':
             if last_candle['ssl_dir'] == 1:
                 in_trend = True
-        if self.cexit_trend_type.value == 'candle' or self.cexit_trend_type.value == 'any':
+        if self.csell_trend_type.value == 'candle' or self.csell_trend_type.value == 'any':
             if last_candle['candle_up_trend'] == 1:
                 in_trend = True
 
-        # Don't exit if we are in a trend unless the pullback threshold is met
+        # Don't sell if we are in a trend unless the pullback threshold is met
         if in_trend == True and current_profit > 0:
-            # Record that we were in a trend for this trade/pair for a more useful exit message later
+            # Record that we were in a trend for this trade/pair for a more useful sell message later
             self.custom_trade_info[trade.pair]['had_trend'] = True
-            # If pullback is enabled and profit has pulled back allow a exit, maybe
-            if self.cexit_pullback.value == True and (current_profit <= pullback_value):
-                if self.cexit_pullback_respect_roi.value == True and current_profit > min_roi:
+            # If pullback is enabled and profit has pulled back allow a sell, maybe
+            if self.csell_pullback.value == True and (current_profit <= pullback_value):
+                if self.csell_pullback_respect_roi.value == True and current_profit > min_roi:
                     return 'intrend_pullback_roi'
-                elif self.cexit_pullback_respect_roi.value == False:
+                elif self.csell_pullback_respect_roi.value == False:
                     if current_profit > min_roi:
                         return 'intrend_pullback_roi'
                     else:
@@ -2490,7 +2524,7 @@ class NNBC(IStrategy):
                 if current_profit > min_roi:
                     self.custom_trade_info[trade.pair]['had_trend'] = False
                     return 'trend_roi'
-                elif self.cexit_endtrend_respect_roi.value == False:
+                elif self.csell_endtrend_respect_roi.value == False:
                     self.custom_trade_info[trade.pair]['had_trend'] = False
                     return 'trend_noroi'
             elif current_profit > min_roi:
