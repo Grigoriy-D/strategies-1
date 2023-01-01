@@ -1,4 +1,6 @@
 import numpy as np
+import scipy.fft
+from scipy.fft import rfft, irfft
 import talib.abstract as ta
 import freqtrade.vendor.qtpylib.indicators as qtpylib
 import arrow
@@ -15,8 +17,6 @@ from freqtrade.persistence import Trade
 # Get rid of pandas warnings during backtesting
 import pandas as pd
 
-from technical.indicators import hull_moving_average
-
 pd.options.mode.chained_assignment = None  # default='warn'
 
 # Strategy specific imports, files must reside in same folder as strategy
@@ -25,27 +25,30 @@ from pathlib import Path
 
 sys.path.append(str(Path(__file__).parent))
 
-import re
+import logging
+import warnings
 
+log = logging.getLogger(__name__)
+# log.setLevel(logging.DEBUG)
+warnings.simplefilter(action='ignore', category=pd.errors.PerformanceWarning)
 
 import custom_indicators as cta
 
 import pywt
+import scipy
 
 
 """
+####################################################################################
+DWT_LongShort - use a Discreet Wavelet Transform (DWT) to estimate future price movements
+            This strategy will enter both long and short positions, and has custom sell
+            logic for each
 
-This strategy is intended to work with leveraged pairs.
-It uses the buy/sell signals from DWT, looking for both uptrends and downtrends
-Note that these are not reall long/short pairs, but 'long' pairs that track 
-long or short 'base' pairs
-
-Note that this strat uses the 'base' pair to trigger buys/sells, so they must be in the config file
-For example, ADA3S/USDT and ADA3L/USDT would be leveraged short/long pairs, and the associated 'base' pair is ADA/USDT
+####################################################################################
 """
 
 
-class DWT_Leveraged_recent(IStrategy):
+class DWT_LongShort(IStrategy):
 
     INTERFACE_VERSION = 3
 
@@ -80,25 +83,31 @@ class DWT_Leveraged_recent(IStrategy):
 
     process_only_new_candles = True
 
+    trading_mode = "futures"
+    margin_mode = "isolated"
+    can_short = True
 
-    # NOTE: hyperspace parameters are in the associated .json file (<clasname>.json)
-    #       Values in that file will override the default values in the variable definitions below
-    #       If the .json file does not exist, you will need to run hyperopt to generate it
+    custom_trade_info = {}
 
-    ## Buy Space Hyperopt Variables
+    ###################################
 
-    entry_long_dwt_diff = DecimalParameter(0.1, 5.0, decimals=1, default=2.0, space='buy', load=True, optimize=True)
-    entry_short_dwt_diff = DecimalParameter(-5.0, -0.1, decimals=1, default=-2.0, space='buy', load=True, optimize=True)
-    # entry_trend_type = CategoricalParameter(['rmi', 'ssl', 'candle', 'macd', 'adx', 'none'], default='none', space='buy',
-    #                                         load=True, optimize=True)
+    # Strategy Specific Variable Storage
 
-    ## Sell Space Hyperopt Variables
+    ## Hyperopt Variables
 
-    exit_long_dwt_diff = DecimalParameter(-5.0, -0.1, decimals=1, default=-2.0, space='sell', load=True, optimize=True)
-    exit_short_dwt_diff = DecimalParameter(0.1, 5.0, decimals=1, default=2.0, space='sell', load=True, optimize=True)
+    dwt_window = startup_candle_count
+
+    # DWT  hyperparams
+    entry_long_dwt_diff = DecimalParameter(0.0, 5.0, decimals=1, default=2.0, space='buy', load=True, optimize=True)
+    entry_short_dwt_diff = DecimalParameter(-5.0, 0.0, decimals=1, default=-2.0, space='buy', load=True, optimize=True)
+    exit_long_dwt_diff = DecimalParameter(-5.0, 0.0, decimals=1, default=-2.0, space='sell', load=True, optimize=True)
+    exit_short_dwt_diff = DecimalParameter(0.0, 5.0, decimals=1, default=-2.0, space='sell', load=True, optimize=True)
+
+    entry_trend_type = CategoricalParameter(['rmi', 'ssl', 'candle', 'macd', 'adx', 'none'], default='none', space='buy',
+                                            load=True, optimize=True)
+
 
     # Custom exit Profit (formerly Dynamic ROI)
-
     cexit_long_roi_type = CategoricalParameter(['static', 'decay', 'step'], default='step', space='sell', load=True,
                                           optimize=True)
     cexit_long_roi_time = IntParameter(720, 1440, default=720, space='sell', load=True, optimize=True)
@@ -128,7 +137,6 @@ class DWT_Leveraged_recent(IStrategy):
                                                       optimize=True)
 
     # Custom Stoploss
-
     cstop_loss_threshold = DecimalParameter(-0.05, -0.01, default=-0.03, space='sell', load=True, optimize=True)
     cstop_bail_how = CategoricalParameter(['roc', 'time', 'any', 'none'], default='none', space='sell', load=True,
                                           optimize=True)
@@ -137,12 +145,26 @@ class DWT_Leveraged_recent(IStrategy):
     cstop_bail_time_trend = CategoricalParameter([True, False], default=True, space='sell', load=True, optimize=True)
     cstop_max_stoploss =  DecimalParameter(-0.30, -0.01, default=-0.10, space='sell', load=True, optimize=True)
 
-    # Strategy Specific Variable Storage
-    dwt_window = startup_candle_count
-    custom_trade_info = {}
-    custom_fiat = "USDT"  # Only relevant if stake is BTC or ETH
+    ###################################
 
-    ############################################################################
+    def leverage(self, pair: str, current_time: datetime, current_rate: float,
+                 proposed_leverage: float, max_leverage: float, entry_tag: Optional[str], side: str,
+                 **kwargs) -> float:
+        """
+        Customize leverage for each new trade. This method is only called in futures mode.
+
+        :param pair: Pair that's currently analyzed
+        :param current_time: datetime object, containing the current datetime
+        :param current_rate: Rate, calculated based on pricing settings in exit_pricing.
+        :param proposed_leverage: A leverage proposed by the bot.
+        :param max_leverage: Max leverage allowed on this pair
+        :param entry_tag: Optional entry_tag (buy_tag) if provided with the buy signal.
+        :param side: 'long' or 'short' - indicating the direction of the proposed trade
+        :return: A leverage amount, which is between 1.0 and max_leverage.
+        """
+        return 5.0
+
+    ###################################  
 
     """
     Informative Pair Definitions
@@ -150,21 +172,10 @@ class DWT_Leveraged_recent(IStrategy):
 
     def informative_pairs(self):
         pairs = self.dp.current_whitelist()
-        informative_pairs = []
-        infs = {}
-        for pair in pairs:
-            inf_pair = self.getInformative(pair)
-            # informative_pairs += [(pair, self.inf_timeframe)]
-            if (inf_pair != ""):
-                infs[inf_pair] = (inf_pair, self.inf_timeframe)
-
-        informative_pairs = list(infs.values())
-
-        # print("informative_pairs: ", informative_pairs)
-
+        informative_pairs = [(pair, self.inf_timeframe) for pair in pairs]
         return informative_pairs
-
-    ############################################################################
+    
+    ###################################
 
     """
     Indicator Definitions
@@ -172,98 +183,81 @@ class DWT_Leveraged_recent(IStrategy):
 
     def populate_indicators(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
 
+
         # Base pair informative timeframe indicators
         curr_pair = metadata['pair']
+        informative = self.dp.get_pair_dataframe(pair=curr_pair, timeframe=self.inf_timeframe)
 
-        # only process if long or short (not 'normal')
-        if (self.isBull(curr_pair)) or (self.isBear(curr_pair)):
-            inf_pair = self.getInformative(curr_pair)
-            # print("pair: ", curr_pair, " inf_pair: ", inf_pair)
+        # DWT
 
-            inf_slow = self.dp.get_pair_dataframe(pair=inf_pair, timeframe=self.inf_timeframe)
-            inf_fast = self.dp.get_pair_dataframe(pair=inf_pair, timeframe=self.timeframe)
+        informative['dwt_model'] = informative['close'].rolling(window=self.dwt_window).apply(self.model)
 
-            # DWT
+        # merge into normal timeframe
+        dataframe = merge_informative_pair(dataframe, informative, self.timeframe, self.inf_timeframe, ffill=True)
 
-            inf_slow['dwt_model'] = inf_slow['close'].rolling(window=self.dwt_window).apply(self.model)
+        # calculate predictive indicators in shorter timeframe (not informative)
 
-            # trend (in informative)
-            inf_fast['candle-up'] = np.where(inf_fast['close'] >= inf_fast['open'], 1, 0)
-            inf_fast['candle-up-trend'] = np.where(inf_fast['candle-up'].rolling(5).sum() >= 3, 1, 0)
-            inf_fast['candle-dn-trend'] = np.where(inf_fast['candle-up'].rolling(5).sum() <= 2, 1, 0)
+        dataframe['dwt_model'] = dataframe[f"dwt_model_{self.inf_timeframe}"]
+        dataframe['dwt_model_diff'] = 100.0 * (dataframe['dwt_model'] - dataframe['close']) / dataframe['close']
 
-            # merge into normal timeframe
-            dataframe = merge_informative_pair(dataframe, inf_slow, self.timeframe, self.inf_timeframe, ffill=True)
-            dataframe = merge_informative_pair(dataframe, inf_fast, self.timeframe, self.timeframe, ffill=True)
+        # MACD
+        macd = ta.MACD(dataframe)
+        dataframe['macd'] = macd['macd']
+        # dataframe['macdsignal'] = macd['macdsignal']
+        dataframe['macdhist'] = macd['macdhist']
 
-            # calculate predictive indicators in shorter timeframe (not informative)
+        # Custom Stoploss
 
-            dataframe['dwt_model'] = dataframe[f"dwt_model_{self.inf_timeframe}"]
-            dataframe['inf_close'] = dataframe[f"close_{self.timeframe}"]
-            dataframe['inf_close2'] = dataframe['inf_close'] / dataframe['close']
-            # dataframe['dwt_model_diff'] = 100.0 * (dataframe['dwt_model'] - dataframe['close']) / dataframe['close']
-            dataframe['dwt_model_diff'] = 100.0 * (dataframe['dwt_model'] - dataframe['inf_close']) / dataframe['inf_close']
+        if not metadata['pair'] in self.custom_trade_info:
+            self.custom_trade_info[metadata['pair']] = {}
+            if not 'had-trend' in self.custom_trade_info[metadata["pair"]]:
+                self.custom_trade_info[metadata['pair']]['had-trend'] = False
 
-            dataframe['inf_candle-up-trend'] = dataframe[f"candle-up-trend_{self.timeframe}"]
-            dataframe['inf_candle-dn-trend'] = dataframe[f"candle-dn-trend_{self.timeframe}"]
+        # MA Streak: https://www.tradingview.com/script/Yq1z7cIv-MA-Streak-Can-Show-When-a-Run-Is-Getting-Long-in-the-Tooth/
+        # dataframe['mastreak'] = cta.mastreak(dataframe, period=4)
 
-            # MACD
-            macd = ta.MACD(dataframe)
-            dataframe['macd'] = macd['macd']
-            # dataframe['macdsignal'] = macd['macdsignal']
-            dataframe['macdhist'] = macd['macdhist']
+        # Trends
 
-            # Custom Stoploss
-
-            if not metadata['pair'] in self.custom_trade_info:
-                self.custom_trade_info[metadata['pair']] = {}
-                if not 'had-trend' in self.custom_trade_info[metadata["pair"]]:
-                    self.custom_trade_info[metadata['pair']]['had-trend'] = False
-
-            # MA Streak: https://www.tradingview.com/script/Yq1z7cIv-MA-Streak-Can-Show-When-a-Run-Is-Getting-Long-in-the-Tooth/
-            # dataframe['mastreak'] = cta.mastreak(dataframe, period=4)
-
-            # Trends
-
-            dataframe['candle-up'] = np.where(dataframe['close'] >= dataframe['open'], 1, 0)
-            dataframe['candle-up-trend'] = np.where(dataframe['candle-up'].rolling(5).sum() >= 3, 1, 0)
-            dataframe['candle-dn-trend'] = np.where(dataframe['candle-up'].rolling(5).sum() <= 2, 1, 0)
+        dataframe['candle-up'] = np.where(dataframe['close'] >= dataframe['open'], 1, 0)
+        dataframe['candle-up-trend'] = np.where(dataframe['candle-up'].rolling(5).sum() >= 3, 1, 0)
+        dataframe['candle-dn-trend'] = np.where(dataframe['candle-up'].rolling(5).sum() <= 2, 1, 0)
 
 
-            # RMI: https://www.tradingview.com/script/kwIt9OgQ-Relative-Momentum-Index/
-            dataframe['rmi'] = cta.RMI(dataframe, length=24, mom=5)
-            dataframe['rmi-up'] = np.where(dataframe['rmi'] >= dataframe['rmi'].shift(), 1, 0)
-            dataframe['rmi-up-trend'] = np.where(dataframe['rmi-up'].rolling(5).sum() >= 3, 1, 0)
-            dataframe['rmi-dn-trend'] = np.where(dataframe['rmi-up'].rolling(5).sum() <= 2, 1, 0)
+        # RMI: https://www.tradingview.com/script/kwIt9OgQ-Relative-Momentum-Index/
+        dataframe['rmi'] = cta.RMI(dataframe, length=24, mom=5)
+        dataframe['rmi-up'] = np.where(dataframe['rmi'] >= dataframe['rmi'].shift(), 1, 0)
+        dataframe['rmi-up-trend'] = np.where(dataframe['rmi-up'].rolling(5).sum() >= 3, 1, 0)
+        dataframe['rmi-dn-trend'] = np.where(dataframe['rmi-up'].rolling(5).sum() <= 2, 1, 0)
 
-            # dataframe['rmi-dn'] = np.where(dataframe['rmi'] <= dataframe['rmi'].shift(), 1, 0)
-            # dataframe['rmi-dn-count'] = dataframe['rmi-dn'].rolling(8).sum()
-            #
-            # dataframe['rmi-up'] = np.where(dataframe['rmi'] > dataframe['rmi'].shift(), 1, 0)
-            # dataframe['rmi-up-count'] = dataframe['rmi-up'].rolling(8).sum()
+        # dataframe['rmi-dn'] = np.where(dataframe['rmi'] <= dataframe['rmi'].shift(), 1, 0)
+        # dataframe['rmi-dn-count'] = dataframe['rmi-dn'].rolling(8).sum()
+        #
+        # dataframe['rmi-up'] = np.where(dataframe['rmi'] > dataframe['rmi'].shift(), 1, 0)
+        # dataframe['rmi-up-count'] = dataframe['rmi-up'].rolling(8).sum()
 
-            dataframe['adx'] = ta.ADX(dataframe)
-            dataframe['dm_plus'] = ta.PLUS_DM(dataframe)
-            dataframe['dm_minus'] = ta.MINUS_DM(dataframe)
-            dataframe['adx-up-trend'] = np.where(
-                (
-                        (dataframe['adx'] > 20.0) &
-                        (dataframe['dm_plus'] > dataframe['dm_minus'])
-                ), 1, 0)
-            dataframe['adx-dn-trend'] = np.where(
-                (
-                        (dataframe['adx'] > 20.0) &
-                        (dataframe['dm_plus'] < dataframe['dm_minus'])
-                ), 1, 0)
+        dataframe['adx'] = ta.ADX(dataframe)
+        dataframe['dm_plus'] = ta.PLUS_DM(dataframe)
+        dataframe['dm_minus'] = ta.MINUS_DM(dataframe)
+        dataframe['adx-up-trend'] = np.where(
+            (
+                    (dataframe['adx'] > 20.0) &
+                    (dataframe['dm_plus'] > dataframe['dm_minus'])
+            ), 1, 0)
+        dataframe['adx-dn-trend'] = np.where(
+            (
+                    (dataframe['adx'] > 20.0) &
+                    (dataframe['dm_plus'] < dataframe['dm_minus'])
+            ), 1, 0)
 
-            # Indicators used only for ROI and Custom Stoploss
-            ssldown, sslup = cta.SSLChannels_ATR(dataframe, length=21)
-            dataframe['sroc'] = cta.SROC(dataframe, roclen=21, emalen=13, smooth=21)
-            dataframe['ssl-dir'] = np.where(sslup > ssldown, 'up', 'down')
+        # Indicators used only for ROI and Custom Stoploss
+        ssldown, sslup = cta.SSLChannels_ATR(dataframe, length=21)
+        dataframe['sroc'] = cta.SROC(dataframe, roclen=21, emalen=13, smooth=21)
+        dataframe['ssl-dir'] = np.where(sslup > ssldown, 'up', 'down')
 
         return dataframe
 
     ###################################
+
 
     def madev(self, d, axis=None):
         """ Mean absolute deviation of a signal """
@@ -310,166 +304,193 @@ class DWT_Leveraged_recent(IStrategy):
         length = len(model)
         return model[length-1]
 
-    ############################################################################
+    def scaledModel(self, a: np.ndarray) -> np.float:
+        #must return scalar, so just calculate prediction and take last value
+        # model = self.dwtModel(np.array(a))
+
+        # de-trend the data
+        w_mean = a.mean()
+        w_std = a.std()
+        x_notrend = (a - w_mean) / w_std
+
+        # get DWT model of data
+        model = self.dwtModel(x_notrend)
+
+        length = len(model)
+        return model[length-1]
+
+    def scaledData(self, a: np.ndarray) -> np.float:
+
+        # scale the data
+        standardized = a.copy()
+        w_mean = np.mean(standardized)
+        w_std = np.std(standardized)
+        scaled = (standardized - w_mean) / w_std
+        # scaled.fillna(0, inplace=True)
+
+        length = len(scaled)
+        return scaled.ravel()[length-1]
+
+    def predict(self, a: np.ndarray) -> np.float:
+
+        # predicts the next value using polynomial extrapolation
+
+        # a.fillna(0)
+
+        # fit the supplied data
+        # Note: extrapolation is notoriously fickle. Be careful
+        length = len(a)
+        x = np.arange(length)
+        f = scipy.interpolate.UnivariateSpline(x, a, k=5)
+
+        # predict 1 step ahead
+        predict = f(length)
+
+        return predict
+
+    ###################################
 
     """
-    Buy Signal
+    entry Signal
     """
+
 
     def populate_entry_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
-
         short_conditions = []
         long_conditions = []
         dataframe.loc[:, 'enter_tag'] = ''
 
-        # 'Bull'/long leveraged token
-        if self.isBull(metadata['pair']):
+        # checks for long/short conditions
+        if (self.entry_trend_type.value != 'none'):
 
-            # volume check
-            long_conditions.append(dataframe['volume'] > 0)
+            # short if uptrend, long if downtrend (contrarian)
+            if (self.entry_trend_type.value != 'rmi'):
+                long_cond = (dataframe['rmi-dn-trend'] == 1)
+                short_cond = (dataframe['rmi-up-trend'] == 1)
+            elif (self.entry_trend_type.value != 'ssl'):
+                long_cond = (dataframe['ssl-dir'] == 'down')
+                short_cond = (dataframe['ssl-dir'] == 'up')
+            elif (self.entry_trend_type.value != 'candle'):
+                long_cond = (dataframe['candle-dn-trend'] == 1)
+                short_cond = (dataframe['candle-up-trend'] == 1)
+            elif (self.entry_trend_type.value != 'macd'):
+                long_cond = (dataframe['macdhist'] < 0.0)
+                short_cond = (dataframe['macdhist'] > 0.0)
+            elif (self.entry_trend_type.value != 'adx'):
+                long_cond = (dataframe['adx-dn-trend'] == 1)
+                short_cond = (dataframe['adx-up-trend'] == 1)
 
-            # Trend
-            long_conditions.append(dataframe['inf_candle-dn-trend'] == 1)
+            long_conditions.append(long_cond)
+            short_conditions.append(short_cond)
 
-            # DWT triggers
-            long_dwt_cond = (
+
+        # Long Processing
+
+        # DWT triggers
+        long_dwt_cond = (
                 qtpylib.crossed_above(dataframe['dwt_model_diff'], self.entry_long_dwt_diff.value)
-            )
+        )
 
-            # DWTs will spike on big gains, so try to constrain
-            long_spike_cond = (
-                    dataframe['dwt_model_diff'] < 2.0 * self.entry_long_dwt_diff.value
-            )
+        # DWTs will spike on big gains, so try to constrain
+        long_spike_cond = (
+                dataframe['dwt_model_diff'] < 2.0 * self.entry_long_dwt_diff.value
+        )
 
-            long_conditions.append(long_dwt_cond)
-            long_conditions.append(long_spike_cond)
+        long_conditions.append(long_dwt_cond)
+        long_conditions.append(long_spike_cond)
 
-            # set entry tags
-            dataframe.loc[long_dwt_cond, 'enter_tag'] += 'long_dwt_entry '
+        # set entry tags
+        dataframe.loc[long_dwt_cond, 'enter_tag'] += 'long_dwt_entry '
 
-            if long_conditions:
-                dataframe.loc[reduce(lambda x, y: x & y, long_conditions), 'enter_long'] = 1
+        if long_conditions:
+            dataframe.loc[reduce(lambda x, y: x & y, long_conditions), 'enter_long'] = 1
 
-        # 'Bear'/short leveraged token
-        elif self.isBear(metadata['pair']):
+        # Short Processing
 
-            # volume check
-            short_conditions.append(dataframe['volume'] > 0)
-
-            # Trend
-            short_conditions.append(dataframe['inf_candle-up-trend'] == 1)
-
-            # DWT triggers
-            short_dwt_cond = (
-                    qtpylib.crossed_below(dataframe['dwt_model_diff'], self.entry_short_dwt_diff.value)
-            )
+        # DWT triggers
+        short_dwt_cond = (
+                qtpylib.crossed_below(dataframe['dwt_model_diff'], self.entry_short_dwt_diff.value)
+        )
 
 
-            # DWTs will spike on big gains, so try to constrain
-            short_spike_cond = (
-                    dataframe['dwt_model_diff'] > 2.0 * self.entry_short_dwt_diff.value
-            )
+        # DWTs will spike on big gains, so try to constrain
+        short_spike_cond = (
+                dataframe['dwt_model_diff'] > 2.0 * self.entry_short_dwt_diff.value
+        )
 
-            short_conditions.append(short_dwt_cond)
-            short_conditions.append(short_spike_cond)
+        short_conditions.append(short_dwt_cond)
+        short_conditions.append(short_spike_cond)
 
-            # set entry tags
-            dataframe.loc[short_dwt_cond, 'enter_tag'] += 'short_dwt_entry '
+        # set entry tags
+        dataframe.loc[short_dwt_cond, 'enter_tag'] += 'short_dwt_entry '
 
-            if short_conditions:
-                dataframe.loc[reduce(lambda x, y: x & y, short_conditions), 'enter_long'] = 1
-
-        else:
-            dataframe.loc[(dataframe['close'].notnull()), 'enter_long'] = 0
+        if short_conditions:
+            dataframe.loc[reduce(lambda x, y: x & y, short_conditions), 'enter_short'] = 1
 
         return dataframe
 
-    ############################################################################
+
+    ###################################
 
     """
-    Sell Signal
+    exit Signal
     """
+
 
     def populate_exit_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
-
         short_conditions = []
         long_conditions = []
         dataframe.loc[:, 'exit_tag'] = ''
 
-        # 'Bull'/long leveraged token
-        if self.isBull(metadata['pair']):
+        # Long Processing
 
-            # DWT triggers
-            long_dwt_cond = (
-                    qtpylib.crossed_below(dataframe['dwt_model_diff'], self.exit_long_dwt_diff.value)
-            )
+        # DWT triggers
+        long_dwt_cond = (
+                qtpylib.crossed_below(dataframe['dwt_model_diff'], self.exit_long_dwt_diff.value)
+        )
 
-            # DWTs will spike on big gains, so try to constrain
-            long_spike_cond = (
-                    dataframe['dwt_model_diff'] > 2.0 * self.exit_long_dwt_diff.value
-            )
+        # DWTs will spike on big gains, so try to constrain
+        long_spike_cond = (
+                dataframe['dwt_model_diff'] > 2.0 * self.exit_long_dwt_diff.value
+        )
 
-            long_conditions.append(long_dwt_cond)
-            long_conditions.append(long_spike_cond)
+        long_conditions.append(long_dwt_cond)
+        long_conditions.append(long_spike_cond)
 
-            # set exit tags
-            dataframe.loc[long_dwt_cond, 'exit_tag'] += 'long_dwt_exit '
+        # set exit tags
+        dataframe.loc[long_dwt_cond, 'exit_tag'] += 'long_dwt_exit '
 
-            if long_conditions:
-                dataframe.loc[reduce(lambda x, y: x & y, long_conditions), 'exit_long'] = 1
-
-        # 'Bear'/short leveraged token
-        elif self.isBear(metadata['pair']):
-
-            # note that these aren't true 'short' pairs, they just leverage in the short direction.
-            # In other words, the conditions are the same as or bull/long pairs, just with independent hyperparameters
-
-            # DWT triggers
-            short_dwt_cond = (
-                qtpylib.crossed_above(dataframe['dwt_model_diff'], self.exit_short_dwt_diff.value)
-            )
+        if long_conditions:
+            dataframe.loc[reduce(lambda x, y: x & y, long_conditions), 'exit_long'] = 1
 
 
-            # DWTs will spike on big gains, so try to constrain
-            short_spike_cond = (
-                    dataframe['dwt_model_diff'] < 2.0 * self.exit_short_dwt_diff.value
-            )
+        # Short Processing
 
-            # conditions.append(trend_cond)
-            short_conditions.append(short_dwt_cond)
-            short_conditions.append(short_spike_cond)
+        # DWT triggers
+        short_dwt_cond = (
+            qtpylib.crossed_above(dataframe['dwt_model_diff'], self.exit_short_dwt_diff.value)
+        )
 
-            # set exit tags
-            dataframe.loc[short_dwt_cond, 'exit_tag'] += 'short_dwt_exit '
 
-            if short_conditions:
-                dataframe.loc[reduce(lambda x, y: x & y, short_conditions), 'exit_long'] = 1
+        # DWTs will spike on big gains, so try to constrain
+        short_spike_cond = (
+                dataframe['dwt_model_diff'] < 2.0 * self.exit_short_dwt_diff.value
+        )
 
-        else:
-            dataframe.loc[(dataframe['close'].notnull()), 'exit_long'] = 0
+        # conditions.append(long_cond)
+        short_conditions.append(short_dwt_cond)
+        short_conditions.append(short_spike_cond)
+
+        # set exit tags
+        dataframe.loc[short_dwt_cond, 'exit_tag'] += 'short_dwt_exit '
+
+        if short_conditions:
+            dataframe.loc[reduce(lambda x, y: x & y, short_conditions), 'exit_short'] = 1
 
         return dataframe
 
 
-    ############################################################################
-
-    def isBull(self, pair):
-        return re.search(".*(BULL|UP|[235]L)", pair)
-
-    def isBear(self, pair):
-        return re.search(".*(BEAR|DOWN|[235]S)", pair)
-
-    def getInformative(self, pair) -> str:
-        inf_pair = ""
-        if self.isBull(pair):
-            inf_pair = re.sub('(BULL|UP|[235]L)', '', pair)
-        elif self.isBear(pair):
-            inf_pair = re.sub('(BEAR|DOWN|[235]S)', '', pair)
-
-        # print(pair, " -> ", inf_pair)
-        return inf_pair
-
-    ############################################################################
+    ###################################
 
     # the custom stoploss/exit logic is adapted from Solipsis by werkkrew (https://github.com/werkkrew/freqtrade-strategies)
 
@@ -551,12 +572,12 @@ class DWT_Leveraged_recent(IStrategy):
             # If pullback is enabled and profit has pulled back allow a exit, maybe
             if self.cexit_long_pullback.value == True and (current_profit <= pullback_value):
                 if self.cexit_long_pullback_respect_roi.value == True and current_profit > min_roi:
-                    return 'long_intrend_pullback_roi'
+                    return 'intrend_pullback_roi'
                 elif self.cexit_long_pullback_respect_roi.value == False:
                     if current_profit > min_roi:
-                        return 'long_intrend_pullback_roi'
+                        return 'intrend_pullback_roi'
                     else:
-                        return 'long_intrend_pullback_noroi'
+                        return 'intrend_pullback_noroi'
             # We are in a trend and pullback is disabled or has not happened or various criteria were not met, hold
             return None
         # If we are not in a trend, just use the roi value
@@ -564,12 +585,12 @@ class DWT_Leveraged_recent(IStrategy):
             if self.custom_trade_info[trade.pair]['had-trend']:
                 if current_profit > min_roi:
                     self.custom_trade_info[trade.pair]['had-trend'] = False
-                    return 'long_trend_roi'
+                    return 'trend_roi'
                 elif self.cexit_long_endtrend_respect_roi.value == False:
                     self.custom_trade_info[trade.pair]['had-trend'] = False
-                    return 'long_trend_noroi'
+                    return 'trend_noroi'
             elif current_profit > min_roi:
-                return 'long_notrend_roi'
+                return 'notrend_roi'
         else:
             return None
 
@@ -598,13 +619,13 @@ class DWT_Leveraged_recent(IStrategy):
 
         # Determine if there is a trend
         if self.cexit_short_trend_type.value == 'rmi' or self.cexit_short_trend_type.value == 'any':
-            if last_candle['rmi-up-trend'] == 1:
+            if last_candle['rmi-dn-trend'] == 1:
                 in_trend = True
         if self.cexit_short_trend_type.value == 'ssl' or self.cexit_short_trend_type.value == 'any':
-            if last_candle['ssl-dir'] == 'up':
+            if last_candle['ssl-dir'] == 'down':
                 in_trend = True
         if self.cexit_short_trend_type.value == 'candle' or self.cexit_short_trend_type.value == 'any':
-            if last_candle['candle-up-trend'] == 1:
+            if last_candle['candle-dn-trend'] == 1:
                 in_trend = True
 
         # Don't exit if we are in a trend unless the pullback threshold is met
@@ -640,9 +661,10 @@ class DWT_Leveraged_recent(IStrategy):
     def custom_exit(self, pair: str, trade: 'Trade', current_time: 'datetime', current_rate: float,
                     current_profit: float, **kwargs):
 
-        if self.isBull(pair):
-            return self.custom_exit_long(pair, trade, current_time, current_rate, current_profit)
-        elif self.isBear(pair):
+        if trade.is_short:
             return self.custom_exit_short(pair, trade, current_time, current_rate, current_profit)
+        else:
+            return self.custom_exit_long(pair, trade, current_time, current_rate, current_profit)
+
 
 

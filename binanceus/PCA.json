@@ -13,8 +13,8 @@
       "trailing_stop_positive_offset": 0.0,
       "trailing_only_offset_is_reached": false
     },
-    "enter": {},
-    "exit": {
+    "buy": {},
+    "sell": {
       "cexit_endtrend_respect_roi": true,
       "cexit_pullback": true,
       "cexit_pullback_amount": 0.019,

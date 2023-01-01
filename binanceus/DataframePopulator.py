@@ -217,8 +217,8 @@ def add_indicators(dataframe: DataFrame) -> DataFrame:
     # MFI
     dataframe['mfi'] = ta.MFI(dataframe)
 
-    # Volume Flow Indicator (MFI) for volume based on the direction of price movement
-    dataframe['vfi'] = fta.VFI(dataframe, period=14)
+    # Volume Flow Indicator (MFI) for volume based on the direction of price movement - uses Finta which I can't gte to work
+    # dataframe['vfi'] = fta.VFI(dataframe, period=14)
 
     # ATR
     dataframe['atr'] = ta.ATR(dataframe, timeperiod=win_size)

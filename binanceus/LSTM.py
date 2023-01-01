@@ -170,7 +170,7 @@ class LSTM(IStrategy):
 
     # LSTM hyperparams
 
-    # Custom Sell Profit (formerly Dynamic ROI)
+    # Custom Exit Profit (formerly Dynamic ROI)
     cexit_roi_type = CategoricalParameter(['static', 'decay', 'step'], default='step', space='sell', load=True,
                                           optimize=True)
     cexit_roi_time = IntParameter(720, 1440, default=720, space='sell', load=True, optimize=True)

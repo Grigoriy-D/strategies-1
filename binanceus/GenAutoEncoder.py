@@ -813,7 +813,7 @@ class GenAutoEncoder(IStrategy):
     Buy Signal
     """
 
-    def populate_buy_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
+    def populate_entry_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
 
         # clear buy/entry signals
         dataframe.loc[:, 'enter_tag'] = ''
@@ -833,7 +833,7 @@ class GenAutoEncoder(IStrategy):
     Sell Signal
     """
 
-    def populate_sell_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
+    def populate_exit_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
 
         # do nothing except clear sell signals
         dataframe.loc[:, 'exit_tag'] = ''

@@ -146,7 +146,7 @@ class PCA_fbb(PCA):
 
         return buys
 
-    def get_train_exit_signals(self, future_df: DataFrame):
+    def get_train_sell_signals(self, future_df: DataFrame):
         sells = np.where(
             (
                 # oversold condition with high potential loss
