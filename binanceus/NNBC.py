@@ -607,7 +607,7 @@ class NNBC(IStrategy):
         # dataframe['mfi_signal'] = dataframe['mfi_buy'] - dataframe['mfi_sell']
 
         # Volume Flow Indicator (MFI) for volume based on the direction of price movement
-        dataframe['vfi'] = fta.VFI(dataframe, period=14)
+        # dataframe['vfi'] = fta.VFI(dataframe, period=14)
         # dataframe['vfi_norm'] = self.norm_column(dataframe['vfi'])
         # dataframe['vfi_buy'] = np.where((dataframe['vfi_norm'] > 0.5), 1.0, 0.0)
         # dataframe['vfi_sell'] = np.where((dataframe['vfi_norm'] <= -0.5), 1.0, 0.0)
