@@ -492,7 +492,7 @@ class FBB_DWT_short(IStrategy):
         if current_profit < self.cstop_loss_threshold.value:
             if self.cstop_bail_how.value == 'roc' or self.cstop_bail_how.value == 'any':
                 # Dynamic bailout based on rate of change
-                if last_candle['sroc'] <= self.cstop_bail_roc.value:
+                if self.last_candle['sroc'] <= self.cstop_bail_roc.value:
                     return 0.01
             if self.cstop_bail_how.value == 'time' or self.cstop_bail_how.value == 'any':
                 # Dynamic bailout based on time, unless time_trend is true and there is a potential reversal
@@ -506,7 +506,7 @@ class FBB_DWT_short(IStrategy):
     ###################################
 
     """
-    Custom exit
+    Custom Exit
     """
 
     def custom_exit(self, pair: str, trade: 'Trade', current_time: 'datetime', current_rate: float,
