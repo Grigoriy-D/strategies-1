@@ -307,6 +307,7 @@ class FBB_DWT_short(IStrategy):
         return scaled.ravel()[length - 1]
 
     def predict(self, a: np.ndarray) -> np.float:
+    return np.dot(a, self.w)
 
         # predicts the next value using polynomial extrapolation
 
@@ -415,13 +416,22 @@ class FBB_DWT_short(IStrategy):
     ###################################
 
     """
-    exit Signal
+    Exit Signal
     """
 
     def populate_exit_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
         short_conditions = []
         dataframe.loc[:, 'exit_tag'] = ''
+        curr_pair = metadata['pair']
 
+        if self.config['runmode'].value == 'hyperopt':
+            if 'sell' in self.config:
+                for params in self.config['sell'].values():
+                    if 'sell_exit' in params:
+                        for exit_condition in params['sell_exit']:
+                            if 'sell_exit_trend' in exit_condition:
+                                short_conditions.append(exit_condition['sell_exit_trend'])
+        
         # Short Processing
 
         # DWT triggers
@@ -443,12 +453,12 @@ class FBB_DWT_short(IStrategy):
         
         # FBB triggers (convert FBB buy triggers to FBB short)
         short_fbb_cond = (
-                (dataframe('fisher_wr') <=self.exit_short_fisher_wr.value)&
-                (dataframe('bb_gain') >= self.exit_short_bb_gain.value))
+                (dataframe['fisher_wr'] <= self.exit_short_fisher_wr.value)&
+                (dataframe['bb_gain'] >= self.exit_short_bb_gain.value))
         
         short_conditions.append(short_fbb_cond)
         
-        dataframe.loc(short_fbb_cond, 'exit_tag') == 'short_fbb_exit '
+        dataframe.loc[short_fbb_cond, 'exit_tag'] = 'short_fbb_exit'
  
         if short_conditions:
             dataframe.loc[reduce(lambda x, y: x & y, short_conditions), 'exit_short'] = 1
