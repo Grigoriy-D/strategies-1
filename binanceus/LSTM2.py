@@ -922,7 +922,7 @@ class LSTM2(IStrategy):
     #     if in_trend == True and current_profit > 0:
     #         # Record that we were in a trend for this trade/pair for a more useful exit message later
     #         self.custom_trade_info[trade.pair]['had_trend'] = True
-    #         # If pullback is enabled and profit has pulled back allow a exit, maybe
+    #         # If pullback is enabled and profit has pulled back allow a sell, maybe
     #         if self.cexit_pullback.value == True and (current_profit <= pullback_value):
     #             if self.cexit_pullback_respect_roi.value == True and current_profit > min_roi:
     #                 return 'intrend_pullback_roi'

@@ -143,7 +143,7 @@ class PCA_dwt(PCA):
     #
     # sell_pca_gain = IntParameter(-1, -15, default=-4, space='exit', load=True, optimize=True)
 
-    # Custom exit Profit (formerly Dynamic ROI)
+    # Custom Sell Profit (formerly Dynamic ROI)
     cexit_roi_type = CategoricalParameter(['static', 'decay', 'step'], default='step', space='sell', load=True,
                                           optimize=True)
     cexit_roi_time = IntParameter(720, 1440, default=720, space='sell', load=True, optimize=True)
