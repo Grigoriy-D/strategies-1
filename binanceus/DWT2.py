@@ -264,7 +264,7 @@ class DWT2(IStrategy):
     ###################################
 
     """
-    entry Signal
+    Entry Signal
     """
 
 
@@ -299,7 +299,7 @@ class DWT2(IStrategy):
     ###################################
 
     """
-    exit Signal
+    Exit Signal
     """
 
 
@@ -365,7 +365,7 @@ class DWT2(IStrategy):
     ###################################
 
     """
-    Custom exit
+    Custom Exit
     """
 
     def custom_exit(self, pair: str, trade: 'Trade', current_time: 'datetime', current_rate: float,
