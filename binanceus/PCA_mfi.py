@@ -60,7 +60,7 @@ class PCA_mfi(PCA):
     # These parameters control much of the behaviour because they control the generation of the training data
     # Unfortunately, these cannot be hyperopt params because they are used in populate_indicators, which is only run
     # once during hyperopt
-    lookahead_hours = 0.5
+    lookahead_hours = 1.0
     n_profit_stddevs = 1.0
     n_loss_stddevs = 1.0
     min_f1_score = 0.70
@@ -118,10 +118,10 @@ class PCA_mfi(PCA):
         buys = np.where(
             (
                 # overbought condition
-                    (future_df['mfi'] <= 20) &
+                    (future_df['mfi'] <= 10) &
 
                     # future profit
-                    (future_df['future_gain'] >= self.profit_threshold)
+                    (future_df['future_gain'] >= future_df['profit_threshold'])
             ), 1.0, 0.0)
 
         return buys
@@ -130,10 +130,10 @@ class PCA_mfi(PCA):
         sells = np.where(
             (
                 # oversold condition
-                    (future_df['mfi'] >= 80) &
+                    (future_df['mfi'] >= 90) &
 
                     # future loss
-                    (future_df['future_gain'] <= self.loss_threshold)
+                    (future_df['future_gain'] <= future_df['loss_threshold'])
             ), 1.0, 0.0)
 
         return sells

@@ -138,16 +138,11 @@ class NNBC_nseq(NNBC):
     def get_train_buy_signals(self, future_df: DataFrame):
         series = np.where(
             (
-                    # (future_df['mfi'] < 30) & # loose guard
+                    (future_df['mfi'] < 30) & # loose guard
+                    (future_df['dwt_nseq_dn'] >= 6) &
+                    (future_df['future_nseq_up'] >= 4) &
 
-                    # down...
-                    (future_df['dwt_nseq_dn'] >= 4) &
-                    (future_df['dwt_win_gain'] <= self.loss_threshold) &
-
-                    # then up...
-                    (future_df['future_nseq_up'] >= 8) &
-                    (future_df['future_win_gain'] >= self.profit_threshold) #&  # future gain
-                    # (future_df['profit_max'] >= future_df['profit_threshold'])   # future profit exceeds threshold
+                    (future_df['future_profit_max'] >= future_df['profit_threshold'])   # future profit exceeds threshold
             ), 1.0, 0.0)
 
         return series
@@ -156,26 +151,21 @@ class NNBC_nseq(NNBC):
 
         series = np.where(
             (
-                    # (future_df['mfi'] > 60) & # loose guard
+                    (future_df['mfi'] > 70) & # loose guard
+                    (future_df['dwt_nseq_up'] >= 10) &
+                    # (future_df['future_nseq_dn'] >= 4) &
 
-                    # up...
-                    (future_df['dwt_nseq_up'] >= 4) &
-                    (future_df['dwt_win_gain'] >= self.profit_threshold) &
-
-                    # then down...
-                    (future_df['future_nseq_dn'] >= 8) &
-                    # (future_df['future_win_gain'] <= self.loss_threshold) #&
-                    (future_df['future_gain'] <= self.loss_threshold) #&
-                    # (future_df['loss_min'] <= future_df['loss_threshold'])   # future loss exceeds threshold
+                    (future_df['future_loss_min'] <= future_df['loss_threshold'])   # future loss exceeds threshold
             ), 1.0, 0.0)
 
         return series
 
-
     # save the indicators used here so that we can see them in plots (prefixed by '%')
     def save_debug_indicators(self, future_df: DataFrame):
-        self.add_debug_indicator(future_df, 'future_nseq_dn')
         self.add_debug_indicator(future_df, 'future_nseq_up')
+        # self.add_debug_indicator(future_df, 'future_nseq_up_thresh')
+        self.add_debug_indicator(future_df, 'future_nseq_dn')
+        # self.add_debug_indicator(future_df, 'future_nseq_dn_thresh')
 
         return
 
@@ -187,9 +177,7 @@ class NNBC_nseq(NNBC):
         cond = np.where(
             (
                 # N down sequences
-                (dataframe['dwt_nseq_dn'] >= self.buy_nseq_dn.value) #&
-                # loss above threshold
-                # (dataframe['dwt_win_gain'] <= self.loss_threshold)
+                (dataframe['dwt_nseq_dn'] >= self.buy_nseq_dn.value)
             ), 1.0, 0.0)
         return cond
 
@@ -197,9 +185,7 @@ class NNBC_nseq(NNBC):
         cond = np.where(
             (
                 # N up sequences
-                (dataframe['dwt_nseq_up'] >= self.sell_nseq_up.value) #&
-                # profit above threshold
-                # (dataframe['dwt_win_gain'] >= self.profit_threshold)
+                ( dataframe['dwt_nseq_up'] >= self.sell_nseq_up.value)
             ), 1.0, 0.0)
         return cond
 

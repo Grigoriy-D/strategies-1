@@ -92,8 +92,8 @@ from AnomalyDetector_LSTM import AnomalyDetector_LSTM
 from AnomalyDetector_PCA import AnomalyDetector_PCA
 from AnomalyDetector_GMix import AnomalyDetector_GMix
 
-import DataframeUtils
-import DataframePopulator
+from DataframeUtils import DataframeUtils
+from DataframePopulator import DataframePopulator
 
 """
 ####################################################################################
@@ -191,6 +191,9 @@ class Anomaly(IStrategy):
 
     compressor = None
     compress_data = True
+
+    dataframeUtils = None
+    dataframePopulator = None
 
     num_pairs = 0
     buy_classifier = None
@@ -376,17 +379,20 @@ class Anomaly(IStrategy):
         self.curr_lookahead = int(12 * self.lookahead_hours)
         self.dbg_curr_df = dataframe
 
-        DataframePopulator.runmode = self.dp.runmode.value
-        DataframePopulator.win_size = min(14, self.curr_lookahead)
-        DataframePopulator.startup_win = self.startup_candle_count
-        DataframePopulator.n_loss_stddevs = self.n_loss_stddevs
-        DataframePopulator.n_profit_stddevs = self.n_profit_stddevs
+        if self.dataframeUtils is None:
+            self.dataframeUtils = DataframeUtils()
 
-        print("")
-        print(curr_pair)
+        if self.dataframePopulator is None:
+            self.dataframePopulator = DataframePopulator()
+
+            self.dataframePopulator.runmode = self.dp.runmode.value
+            self.dataframePopulator.win_size = min(14, self.curr_lookahead)
+            self.dataframePopulator.startup_win = self.startup_candle_count
+            self.dataframePopulator.n_loss_stddevs = self.n_loss_stddevs
+            self.dataframePopulator.n_profit_stddevs = self.n_profit_stddevs
 
         # populate the normal dataframe
-        dataframe = DataframePopulator.add_indicators(dataframe)
+        dataframe = self.dataframePopulator.add_indicators(dataframe)
         # dataframe = self.add_indicators(dataframe)
 
         if Anomaly.first_time:
@@ -398,18 +404,21 @@ class Anomaly(IStrategy):
 
             print("    Lookahead: ", self.curr_lookahead, " candles (", self.lookahead_hours, " hours)")
 
+        print("")
+        print(curr_pair)
+
         # create labels used for training
         buys, sells = self.create_training_data(dataframe)
 
-        # drop last group (because there cannot be a prediction)
-        df = dataframe.iloc[:-self.curr_lookahead]
-        buys = buys.iloc[:-self.curr_lookahead]
-        sells = sells.iloc[:-self.curr_lookahead]
+        # # drop last group (because there cannot be a prediction)
+        # df = dataframe.iloc[:-self.curr_lookahead]
+        # buys = buys.iloc[:-self.curr_lookahead]
+        # sells = sells.iloc[:-self.curr_lookahead]
 
         # train the models on the informative data
         if self.dbg_verbose:
             print("    training models...")
-        df = self.train_models(curr_pair, df, buys, sells)
+        df = self.train_models(curr_pair, dataframe, buys, sells)
 
         # add predictions
 
@@ -441,7 +450,7 @@ class Anomaly(IStrategy):
             if not 'had_trend' in self.custom_trade_info[pair]:
                 self.custom_trade_info[pair]['had_trend'] = False
 
-        dataframe = DataframePopulator.add_stoploss_indicators(dataframe)
+        dataframe = self.dataframePopulator.add_stoploss_indicators(dataframe)
 
         return dataframe
 
@@ -453,8 +462,8 @@ class Anomaly(IStrategy):
     def create_training_data(self, dataframe: DataFrame):
 
         # future_df = self.add_future_data(dataframe.copy())
-        future_df = DataframePopulator.add_hidden_indicators(dataframe.copy())
-        future_df = DataframePopulator.add_future_data(future_df, self.curr_lookahead)
+        future_df = self.dataframePopulator.add_hidden_indicators(dataframe.copy())
+        future_df = self.dataframePopulator.add_future_data(future_df, self.curr_lookahead)
 
         future_df['train_buy'] = 0.0
         future_df['train_sell'] = 0.0
@@ -542,7 +551,7 @@ class Anomaly(IStrategy):
             clf = AnomalyDetector_SVM(self.curr_pair, tag=tag)
 
         elif self.classifier_type == self.ClassifierType.PCA:
-            clf = AnomalyDetector_PCA(nfeatures, tag=tag)
+            clf = AnomalyDetector_PCA(self.curr_pair, tag=tag)
 
         elif self.classifier_type == self.ClassifierType.LSTMAutoEncoder:
             clf = AnomalyDetector_LSTM(nfeatures, tag=tag)
@@ -573,7 +582,7 @@ class Anomaly(IStrategy):
 
         rand_st = 27  # use fixed number for reproducibility
 
-        full_df_norm = DataframeUtils.norm_dataframe(dataframe)
+        full_df_norm = self.dataframeUtils.norm_dataframe(dataframe)
 
 
         if self.compress_data:
@@ -612,9 +621,9 @@ class Anomaly(IStrategy):
         #                                                                                       random_state=rand_st,
         #                                                                                       shuffle=False)
         # use the back portion of data for training, front for testing
-        df_test, df_train = DataframeUtils.split_dataframe(full_df_norm, (1.0 - train_ratio))
-        test_buys, train_buys = DataframeUtils.split_array(buys, (1.0 - train_ratio))
-        test_sells, train_sells = DataframeUtils.split_array(sells, (1.0 - train_ratio))
+        df_test, df_train = self.dataframeUtils.split_dataframe(full_df_norm, (1.0 - train_ratio))
+        test_buys, train_buys = self.dataframeUtils.split_array(buys, (1.0 - train_ratio))
+        test_sells, train_sells = self.dataframeUtils.split_array(sells, (1.0 - train_ratio))
 
         if self.dbg_verbose:
             print("     dataframe:", full_df_norm.shape, ' -> train:', df_train.shape, " + test:", df_test.shape)
@@ -624,10 +633,10 @@ class Anomaly(IStrategy):
         print("    #training samples:", len(df_train), " #buys:", int(train_buys.sum()), ' #sells:',
               int(train_sells.sum()))
 
-        train_buy_labels = DataframeUtils.get_binary_labels(train_buys)
-        train_sell_labels = DataframeUtils.get_binary_labels(train_sells)
-        test_buy_labels = DataframeUtils.get_binary_labels(test_buys)
-        test_sell_labels = DataframeUtils.get_binary_labels(test_sells)
+        train_buy_labels = self.dataframeUtils.get_binary_labels(train_buys)
+        train_sell_labels = self.dataframeUtils.get_binary_labels(train_sells)
+        test_buy_labels = self.dataframeUtils.get_binary_labels(test_buys)
+        test_sell_labels = self.dataframeUtils.get_binary_labels(test_sells)
 
         # force train/fit the classifiers in backtest mode only
         force_train = True if (self.dp.runmode.value in ('backtest')) else False
@@ -659,18 +668,18 @@ class Anomaly(IStrategy):
         # if running 'plot', reconstruct the original dataframe for display
         if self.dp.runmode.value in ('plot'):
             if self.compress_data:
-                df_norm = DataframeUtils.norm_dataframe(dataframe)  # this also resets the scaler
+                df_norm = self.dataframeUtils.norm_dataframe(dataframe)  # this also resets the scaler
                 df_compressed = self.compress_dataframe(df_norm)
                 df_recon_compressed = self.buy_classifier.reconstruct(df_compressed)
                 df_recon_norm = self.compressor.inverse_transform(df_recon_compressed)
                 df_recon_norm = pd.DataFrame(df_recon_norm, columns=df_norm.columns)
-                df_recon = DataframeUtils.denorm_dataframe(df_recon_norm)
+                df_recon = self.dataframeUtils.denorm_dataframe(df_recon_norm)
                 dataframe['%recon'] = df_recon['close']
             else:
                 # debug: get reconstructed dataframe and save 'close' as a comparison
-                tmp = DataframeUtils.norm_dataframe(dataframe)  # this just resets the scaler
+                tmp = self.dataframeUtils.norm_dataframe(dataframe)  # this just resets the scaler
                 df_recon_norm = self.buy_classifier.reconstruct(tmp)
-                df_recon = DataframeUtils.denorm_dataframe(df_recon_norm)
+                df_recon = self.dataframeUtils.denorm_dataframe(df_recon_norm)
                 dataframe['%recon'] = df_recon['close']
         return dataframe
 
@@ -738,7 +747,7 @@ class Anomaly(IStrategy):
 
         if clf:
             # print("    predicting... - dataframe:", dataframe.shape)
-            df_norm = DataframeUtils.norm_dataframe(dataframe)
+            df_norm = self.dataframeUtils.norm_dataframe(dataframe)
             if self.compress_data:
                 df_norm = self.compress_dataframe(df_norm)
             predict = clf.predict(df_norm)
@@ -805,7 +814,7 @@ class Anomaly(IStrategy):
     Buy Signal
     """
 
-    def populate__entry_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
+    def populate_entry_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
         conditions = []
         dataframe.loc[:, 'enter_tag'] = ''
         curr_pair = metadata['pair']
@@ -841,7 +850,7 @@ class Anomaly(IStrategy):
             conditions.append(strat_cond)
 
         # sell signal is not active
-        # conditions.append(dataframe['predict_sell'] < 0.1)
+        conditions.append(dataframe['predict_sell'] < 0.1)
 
         # PCA/Classifier triggers
         anomaly_cond = (
@@ -890,7 +899,7 @@ class Anomaly(IStrategy):
         # conditions.append(dataframe['fisher_wr'] > 0.5)
 
         # MFI
-        conditions.append(dataframe['mfi'] > 60.0)
+        conditions.append(dataframe['mfi'] > 50.0)
 
         # add strategy-specific conditions (from subclass)
         strat_cond = self.get_strategy_sell_conditions(dataframe)
