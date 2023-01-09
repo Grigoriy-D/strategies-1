@@ -40,15 +40,16 @@ import scipy
 
 """
 ####################################################################################
-DWT_LongShort - use a Discreet Wavelet Transform (DWT) to estimate future price movements
+DWT_LongShort_RL - uses a Discreet Wavelet Transform (DWT) to estimate future price movements
+            and uses a long-short reinforcement learning (RL) strategy to make trading decisions
             This strategy will enter both long and short positions, and has custom sell
-            logic for each
+            logic for each.
 
 ####################################################################################
 """
 
 
-class DWT_LongShort(IStrategy):
+class DWT_LongShort_RL(IStrategy):
 
     INTERFACE_VERSION = 3
 
@@ -648,4 +649,51 @@ class DWT_LongShort(IStrategy):
             return self.custom_exit_long(pair, trade, current_time, current_rate, current_profit)
 
 
+    def calculate_reward(self, action: int) -> float: 
 
+        pnl = self.get_unrealized_profit()
+        factor = 100.
+
+        # reward agent for entering trades
+        if (action == Actions.Long_enter.value
+                and self._position == Positions.Neutral):
+            return 25
+        if (action == Actions.Short_enter.value
+                and self._position == Positions.Neutral):
+            return 25
+
+       # discourage agent from not entering trades
+        if action == Actions.Neutral.value and self._position == Positions.Neutral:
+            return -1
+
+        max_trade_duration = self.rl_config.get('max_trade_duration_candles', 300)
+            trade_duration = self._current_tick - self._last_trade_tick  # type: ignore
+
+        if trade_duration <= max_trade_duration:
+    factor *= 1.5
+            elif trade_duration > max_trade_duration:
+                factor *= 0.5
+
+        # discourage sitting in position
+        if (self._position in (Positions.Short, Positions.Long) and
+            action == Actions.Neutral.value):
+                return -1 * trade_duration / max_trade_duration
+
+        # close long
+        if action == Actions.Long_exit.value and self._position == Positions.Long:
+            if pnl > self.profit_aim * self.rr:
+                factor *= self.rl_config['model_reward_parameters'].get('win_reward_factor', 2)
+            return float(pnl * factor)
+
+        # close short
+        if action == Actions.Short_exit.value and self._position == Positions.Short:
+            if pnl > self.profit_aim * self.rr:
+                factor *= self.rl_config['model_reward_parameters'].get('win_reward_factor', 2)
+            return float(pnl * factor)
+
+        return 0.
+       
+
+
+
+        
