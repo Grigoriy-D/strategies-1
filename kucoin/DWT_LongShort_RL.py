@@ -2,6 +2,7 @@ import numpy as np
 import scipy.fft
 from scipy.fft import rfft, irfft
 import talib.abstract as ta
+from freqtrade.freqai.RL.Base5ActionRLEnv import Actions
 import freqtrade.vendor.qtpylib.indicators as qtpylib
 import arrow
 
@@ -671,7 +672,7 @@ class DWT_LongShort_RL(IStrategy):
 
         if trade_duration <= max_trade_duration:
             factor *= 1.5
-            elif trade_duration > max_trade_duration:
+        elif trade_duration > max_trade_duration:
             factor *= 0.5
 
         # discourage sitting in position
