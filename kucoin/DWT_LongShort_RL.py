@@ -3,6 +3,7 @@ import scipy.fft
 from scipy.fft import rfft, irfft
 import talib.abstract as ta
 from freqtrade.freqai.RL.Base5ActionRLEnv import Actions
+from freqtrade.freqai.RL.BaseEnvironment import Positions
 import freqtrade.vendor.qtpylib.indicators as qtpylib
 import arrow
 
@@ -668,7 +669,7 @@ class DWT_LongShort_RL(IStrategy):
             return -1
 
         max_trade_duration = self.rl_config.get('max_trade_duration_candles', 300)
-            trade_duration = self._current_tick - self._last_trade_tick  # type: ignore
+                trade_duration = self._current_tick - self._last_trade_tick  # type: ignore
 
         if trade_duration <= max_trade_duration:
             factor *= 1.5
