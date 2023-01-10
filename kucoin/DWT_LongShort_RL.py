@@ -670,9 +670,9 @@ class DWT_LongShort_RL(IStrategy):
             trade_duration = self._current_tick - self._last_trade_tick  # type: ignore
 
         if trade_duration <= max_trade_duration:
-    factor *= 1.5
+            factor *= 1.5
             elif trade_duration > max_trade_duration:
-                factor *= 0.5
+            factor *= 0.5
 
         # discourage sitting in position
         if (self._position in (Positions.Short, Positions.Long) and
