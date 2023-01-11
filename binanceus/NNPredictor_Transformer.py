@@ -57,15 +57,16 @@ class NNPredictor_Transformer(ClassifierKerasLinear):
         # ff_dim = 4
         ff_dim = seq_len
         num_transformer_blocks = 4
-        mlp_units = [128]
-        mlp_dropout = 0.4
-        dropout = 0.25
+        mlp_units = [64, 16, 8]
+        mlp_dropout = 0.2
+        dropout = 0.2
 
         inputs = keras.Input(shape=(seq_len, num_features))
         x = inputs
         for _ in range(num_transformer_blocks):
             x = self.transformer_encoder(x, head_size, num_heads, dropout, ff_dim)
 
+        # may not need this part:
         x = layers.GlobalAveragePooling1D(keepdims=True, data_format="channels_first")(x)
         for dim in mlp_units:
             # x = layers.Dense(dim, activation="relu")(x)
