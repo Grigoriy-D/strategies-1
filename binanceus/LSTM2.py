@@ -674,7 +674,7 @@ class LSTM2(IStrategy):
         print("runs:{} predictions:{}".format(nruns, len(predictions)))
         return predictions
 
-    def roll_get_prediction(self, col) -> np.float:
+    def roll_get_prediction(self, col) -> float:
         # must return scalar, so just calculate prediction and take last value
 
         # print(col.index)
@@ -692,7 +692,7 @@ class LSTM2(IStrategy):
 
 
     # returns (rolling) smoothed version of input column
-    def roll_smooth(self, col) -> np.float:
+    def roll_smooth(self, col) -> float:
         # must return scalar, so just calculate prediction and take last value
 
         smooth = gaussian_filter1d(col, 4)
@@ -704,7 +704,7 @@ class LSTM2(IStrategy):
         else:
             return col[len(col) - 1]
 
-    def roll_strong_smooth(self, col) -> np.float:
+    def roll_strong_smooth(self, col) -> float:
         # must return scalar, so just calculate prediction and take last value
 
         smooth = gaussian_filter1d(col, 24)

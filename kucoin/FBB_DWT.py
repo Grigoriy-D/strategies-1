@@ -267,14 +267,14 @@ class FBB_DWT(IStrategy):
 
         return model
 
-    def model(self, a: np.ndarray) -> np.float:
+    def model(self, a: np.ndarray) -> float:
         #must return scalar, so just calculate prediction and take last value
         # model = self.dwtModel(np.array(a))
         model = self.dwtModel(a)
         length = len(model)
         return model[length-1]
 
-    def predict(self, a: np.ndarray) -> np.float:
+    def predict(self, a: np.ndarray) -> float:
         #must return scalar, so just calculate prediction and take last value
         # npredict = self.buy_dwt_lookahead.value
         npredict = self.dwt_lookahead

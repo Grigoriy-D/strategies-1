@@ -195,7 +195,7 @@ class SARIMAX(IStrategy):
 
     ###################################
 
-    def model(self, a: np.ndarray) -> np.float:
+    def model(self, a: np.ndarray) -> float:
 
         # scale the data
         standardized = a.copy()

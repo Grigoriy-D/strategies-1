@@ -292,7 +292,7 @@ class DWT_Leveraged(IStrategy):
 
         return model
 
-    def model(self, a: np.ndarray) -> np.float:
+    def model(self, a: np.ndarray) -> float:
         #must return scalar, so just calculate prediction and take last value
         # model = self.dwtModel(np.array(a))
 

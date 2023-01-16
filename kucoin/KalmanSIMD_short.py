@@ -239,7 +239,7 @@ class KalmanSIMD_short(IStrategy):
         return np.mean(np.absolute(d - np.mean(d, axis)), axis)
 
 
-    def model(self, a: np.ndarray) -> np.float:
+    def model(self, a: np.ndarray) -> float:
         # scale the data
         standardized = a.copy()
         w_mean = np.mean(standardized)
@@ -261,7 +261,7 @@ class KalmanSIMD_short(IStrategy):
         length = len(model)
         return model[length-1]
 
-    def scaledModel(self, a: np.ndarray) -> np.float:
+    def scaledModel(self, a: np.ndarray) -> float:
         #must return scalar, so just calculate prediction and take last value
         # model = self.KalmanModel(np.array(a))
 
@@ -276,7 +276,7 @@ class KalmanSIMD_short(IStrategy):
         length = len(model)
         return model[length-1]
 
-    def scaledData(self, a: np.ndarray) -> np.float:
+    def scaledData(self, a: np.ndarray) -> float:
 
         # scale the data
         standardized = a.copy()
@@ -313,7 +313,7 @@ class KalmanSIMD_short(IStrategy):
 
         return model
     
-    def predict(self, a: np.ndarray) -> np.float:
+    def predict(self, a: np.ndarray) -> float:
 
         # predicts the next value using polynomial extrapolation
 

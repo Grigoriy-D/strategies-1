@@ -1,3 +1,4 @@
+import operator
 
 import numpy as np
 from enum import Enum
@@ -98,7 +99,7 @@ PCA - uses Principal Component Analysis to try and reduce the total set of indic
 ####################################################################################
 """
 
-class PCA3(IStrategy):
+class PCA3_short(IStrategy):
     # Do *not* hyperopt for the roi and stoploss spaces (unless you turn off custom stoploss)
 
     # ROI table:
@@ -1898,10 +1899,22 @@ class PCA3(IStrategy):
         # set entry tags
         dataframe.loc[pca_cond, 'enter_tag'] += 'pca_entry '
 
-        if conditions:
-            dataframe.loc[reduce(lambda x, y: x & y, conditions), 'buy'] = 1
+        if enter_long_conditions:
+            dataframe.loc[reduce(lambda x, y: x & y, conditions), 'enter_long'] = 1
         else:
-            dataframe['buy'] = 0
+            dataframe['enter_long'] = 0
+
+        enter_short_conditions = [
+            df["do_predict"] == 1,
+            df["&-s_close"] < df[f"sell_roi_{self.std_dev_multiplier_sell.value}"],
+            ]
+
+        if enter_short_conditions:
+            df.loc[
+                reduce(lambda x, y: x & y, enter_short_conditions), ["enter_short", "enter_tag"]
+                ] = (1, "short")
+
+
 
         return dataframe
 
@@ -1945,13 +1958,58 @@ class PCA3(IStrategy):
         dataframe.loc[pca_cond, 'exit_tag'] += 'pca_exit '
 
         if conditions:
-            dataframe.loc[reduce(lambda x, y: x & y, conditions), 'sell'] = 1
+            dataframe.loc[reduce(lambda x, y: x & y, conditions), 'enter_short'] = 1
         else:
-            dataframe['sell'] = 0
+            dataframe['enter_short'] = 0
 
         return dataframe
 
         ###################################
+
+    """
+    Calculate RL Reward
+    """
+
+    class MyRLEnv(Base3ActionRLEnv): """ User can override any function in BaseRLEnv and gym.Env. Here the user sets a custom reward based on profit and trade duration. """
+    
+    def calculate_reward(self, action: int) -> float:
+
+            # first, penalize if the action is not valid
+            if not self._is_valid(action):
+                return -2
+
+            pnl = self.get_unrealized_profit()
+            rew = np.sign(pnl) * (pnl + 1)
+            factor = 100.
+
+            # reward agent for entering trades
+            if (action in (Actions.Buy.value, Actions.Sell.value)
+            and self._position == Positions.Neutral):
+                return 25
+            # discourage agent from not entering trades
+            if action == Actions.Neutral.value and self._position == Positions.Neutral:
+                return -1
+
+            max_trade_duration = self.rl_config.get('max_trade_duration_candles', 300)
+            trade_duration = self._current_tick - self._last_trade_tick  # type: ignore
+
+            if trade_duration <= max_trade_duration:
+                factor *= 1.5
+            elif trade_duration > max_trade_duration:
+                factor *= 0.5
+
+             # discourage sitting in position
+            if self._position in (Positions.Short, Positions.Long) and (
+            action == Actions.Neutral.value
+            or (action == Actions.Sell.value and self._position == Positions.Short)
+            or (action == Actions.Buy.value and self._position == Positions.Long)
+            ):
+                return -1 * trade_duration / max_trade_duration
+
+            # close position
+            if (action == Actions.Buy.value and self._position == Positions.Short) or (
+                action == Actions.Sell.value and self._position == Positions.Long
+            ):
 
         """
         Custom Stoploss

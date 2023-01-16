@@ -603,7 +603,7 @@ class NNPredict(IStrategy):
     #######################################
 
     # returns (rolling) smoothed version of input column
-    def roll_smooth(self, col) -> np.float:
+    def roll_smooth(self, col) -> float:
         # must return scalar, so just calculate prediction and take last value
 
         smooth = gaussian_filter1d(col, 4)
@@ -615,7 +615,7 @@ class NNPredict(IStrategy):
         else:
             return col[len(col) - 1]
 
-    def roll_strong_smooth(self, col) -> np.float:
+    def roll_strong_smooth(self, col) -> float:
         # must return scalar, so just calculate prediction and take last value
 
         smooth = gaussian_filter1d(col, 24)

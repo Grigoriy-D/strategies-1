@@ -228,7 +228,7 @@ class Kalman(IStrategy):
 
     ###################################
 
-    def model(self, a: np.ndarray) -> np.float:
+    def model(self, a: np.ndarray) -> float:
 
         # scale the data
         standardized = a.copy()
@@ -251,7 +251,7 @@ class Kalman(IStrategy):
         length = len(model)
         return model[length-1]
     
-    def scaledModel(self, a: np.ndarray) -> np.float:
+    def scaledModel(self, a: np.ndarray) -> float:
 
         # scale the data
         standardized = a.copy()
@@ -266,7 +266,7 @@ class Kalman(IStrategy):
         length = len(model)
         return model[length-1]
 
-    def scaledData(self, a: np.ndarray) -> np.float:
+    def scaledData(self, a: np.ndarray) -> float:
 
         # scale the data
         standardized = a.copy()

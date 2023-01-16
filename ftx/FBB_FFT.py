@@ -228,7 +228,7 @@ class FBB_FFT(IStrategy):
     ###################################
 
 
-    def model(self, a: np.ndarray) -> np.float:
+    def model(self, a: np.ndarray) -> float:
         #must return scalar, so just calculate prediction and take last value
         npredict = self.buy_fft_lookahead.value
         model = self.fourierModel(np.array(a))
@@ -253,7 +253,7 @@ class FBB_FFT(IStrategy):
 
         return model
 
-    def predict(self, a: np.ndarray) -> np.float:
+    def predict(self, a: np.ndarray) -> float:
         #must return scalar, so just calculate prediction and take last value
         npredict = self.fft_lookahead
         # y = self.fourierExtrapolation(np.array(a), 0)

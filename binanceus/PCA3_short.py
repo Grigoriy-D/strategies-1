@@ -1,3 +1,4 @@
+import operator
 
 import numpy as np
 from enum import Enum
@@ -98,7 +99,7 @@ PCA - uses Principal Component Analysis to try and reduce the total set of indic
 ####################################################################################
 """
 
-class PCA3(IStrategy):
+class PCA3_short(IStrategy):
     # Do *not* hyperopt for the roi and stoploss spaces (unless you turn off custom stoploss)
 
     # ROI table:

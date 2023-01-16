@@ -227,7 +227,7 @@ class KalmanSIMD(IStrategy):
 
     ###################################
 
-    def model(self, a: np.ndarray) -> np.float:
+    def model(self, a: np.ndarray) -> float:
 
         # scale the data
         standardized = a.copy()
@@ -250,7 +250,7 @@ class KalmanSIMD(IStrategy):
         length = len(model)
         return model[length-1]
     
-    def scaledModel(self, a: np.ndarray) -> np.float:
+    def scaledModel(self, a: np.ndarray) -> float:
 
         # scale the data
         standardized = a.copy()
@@ -265,7 +265,7 @@ class KalmanSIMD(IStrategy):
         length = len(model)
         return model[length-1]
 
-    def scaledData(self, a: np.ndarray) -> np.float:
+    def scaledData(self, a: np.ndarray) -> float:
 
         # scale the data
         standardized = a.copy()
@@ -303,7 +303,7 @@ class KalmanSIMD(IStrategy):
         return model
 
 
-    def predict(self, a: np.ndarray) -> np.float:
+    def predict(self, a: np.ndarray) -> float:
 
         # predicts the next value using polynomial extrapolation
 

@@ -242,7 +242,7 @@ class FBB_Kalman(IStrategy):
 
 
 
-    def model(self, a: np.ndarray) -> np.float:
+    def model(self, a: np.ndarray) -> float:
         # must return scalar, so just calculate prediction and take last value
         model = self.kalmanModel(np.array(a))
         length = len(model)
@@ -254,7 +254,7 @@ class FBB_Kalman(IStrategy):
 
         return model
 
-    def predict(self, a: np.ndarray) -> np.float:
+    def predict(self, a: np.ndarray) -> float:
         # must return scalar, so just calculate prediction and take last value
 
         # kf = self.kalman_filter.em(np.array(a), n_iter=self.lookback_len)

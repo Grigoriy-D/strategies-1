@@ -206,7 +206,7 @@ class FFT_Lev(IStrategy):
     ###################################
 
 
-    def model(self, a: np.ndarray) -> np.float:
+    def model(self, a: np.ndarray) -> float:
         #must return scalar, so just calculate prediction and take last value
 
         # scale the data
@@ -248,7 +248,7 @@ class FFT_Lev(IStrategy):
 
         return model
 
-    def scaledModel(self, a: np.ndarray) -> np.float:
+    def scaledModel(self, a: np.ndarray) -> float:
 
         # scale the data
         standardized = a.copy()
@@ -263,7 +263,7 @@ class FFT_Lev(IStrategy):
         length = len(model)
         return model[length-1]
 
-    def scaledData(self, a: np.ndarray) -> np.float:
+    def scaledData(self, a: np.ndarray) -> float:
 
         # scale the data
         standardized = a.copy()
@@ -275,7 +275,7 @@ class FFT_Lev(IStrategy):
         length = len(scaled)
         return scaled.ravel()[length-1]
 
-    def predict(self, a: np.ndarray) -> np.float:
+    def predict(self, a: np.ndarray) -> float:
         #must return scalar, so just calculate prediction and take last value
         npredict = self.fft_lookahead
         # y = self.fourierExtrapolation(np.array(a), 0)
