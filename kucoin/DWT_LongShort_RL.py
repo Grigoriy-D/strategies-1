@@ -669,7 +669,7 @@ class DWT_LongShort_RL(IStrategy):
             return -1
 
         max_trade_duration = self.rl_config.get('max_trade_duration_candles', 300)
-                trade_duration = self._current_tick - self._last_trade_tick  # type: ignore
+            trade_duration = self._current_tick - self._last_trade_tick  # type: ignore
 
         if trade_duration <= max_trade_duration:
             factor *= 1.5

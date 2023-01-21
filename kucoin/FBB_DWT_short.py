@@ -307,7 +307,7 @@ class FBB_DWT_short(IStrategy):
         return scaled.ravel()[length - 1]
 
     def predict(self, a: np.ndarray) -> float:
-    return np.dot(a, self.w)
+        return np.dot(a, self.w)
 
         # predicts the next value using polynomial extrapolation
 
