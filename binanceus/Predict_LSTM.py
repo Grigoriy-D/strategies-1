@@ -81,7 +81,7 @@ Predict_LSTM - uses a Long-Short Term Memory neural network to try and predict t
 class Predict_LSTM(IStrategy):
     plot_config = {
         'main_plot': {
-            'close': {'color': 'green'},
+            'close': {'color': 'cornflowerblue'},
             # 'smooth': {'color': 'teal'},
             'predict': {'color': 'lightpink'},
         },

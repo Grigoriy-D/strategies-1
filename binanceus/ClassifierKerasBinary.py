@@ -88,7 +88,17 @@ class ClassifierKerasBinary(ClassifierKeras):
     # the 'labels' args should contain 0.0 for normal results, '1.0' for anomalies (buy or sell)
     def train(self, df_train_norm, df_test_norm, train_results, test_results, force_train=False):
 
-        if self.is_trained and not force_train:
+        # lazy loading because params can change up to this point
+        if self.model is None:
+            # load saved model if present
+            self.model = self.load()
+
+        # print(f'is_trained:{self.is_trained} force_train:{force_train}')
+
+        # if model is already trained, and caller is not requesting a re-train, then just return
+        if (self.model is not None) and self.model_is_trained() and (not force_train) and (not self.new_model_created()):
+            # print(f"    Not training. is_trained:{self.is_trained} force_train:{force_train} new_model:{self.new_model}")
+            print("    Model is already trained")
             return
 
         if self.model is None:
@@ -99,7 +109,7 @@ class ClassifierKerasBinary(ClassifierKeras):
             self.model = self.compile_model(self.model)
             self.model.summary()
 
-        if not isinstance(df_train_norm, (np.ndarray, np.array)):
+        if self.dataframeUtils.is_dataframe(df_train_norm):
             # remove rows with positive labels?!
             if self.clean_data_required:
                 df1 = df_train_norm.copy()
@@ -181,8 +191,12 @@ class ClassifierKerasBinary(ClassifierKeras):
 
     def predict(self, data):
 
+        # lazy loading because params can change up to this point
+        if self.model is None:
+            # load saved model if present
+            self.model = self.load()
 
-        if not isinstance(data, (np.ndarray, np.array)):
+        if self.dataframeUtils.is_dataframe(data):
             # convert dataframe to tensor
             df_tensor = self.dataframeUtils.df_to_tensor(data, self.seq_len)
         else:
