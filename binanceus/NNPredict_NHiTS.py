@@ -96,7 +96,7 @@ class NNPredict_NHiTS(NNPredict):
     # Unfortunately, these cannot be hyperopt params because they are used in populate_indicators, which is only run
     # once during hyperopt
     # lookahead_hours = 1.0
-    lookahead_hours = 1.0
+    lookahead_hours = 0.4
     n_profit_stddevs = 0.0
     n_loss_stddevs = 0.0
     min_f1_score = 0.70
@@ -149,7 +149,10 @@ class NNPredict_NHiTS(NNPredict):
     ################################
 
     def get_classifier(self, pair, seq_len: int, num_features: int):
-        predictor = NNPredictor_NHiTS(pair, seq_len, num_features)
+
+        # use_gpu = False if (self.dp.runmode.value in ('hyperopt')) else True
+        use_gpu = True
+        predictor = NNPredictor_NHiTS(pair, seq_len, num_features, use_gpu=use_gpu)
         predictor.set_lookahead(self.curr_lookahead)
         return predictor
 
