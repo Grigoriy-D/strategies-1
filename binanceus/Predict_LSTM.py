@@ -1218,16 +1218,3 @@ def is_resistance(row_data) -> bool:
 def range_percent_change(dataframe: DataFrame, method, length: int) -> float:
     """
     Rolling Percentage Change Maximum across interval.
-
-    :param dataframe: DataFrame The original OHLC dataframe
-    :param method: High to Low / Open to Close
-    :param length: int The length to look back
-    """
-    if method == 'HL':
-        return (dataframe['high'].rolling(length).max() - dataframe['low'].rolling(length).min()) / dataframe[
-            'low'].rolling(length).min()
-    elif method == 'OC':
-        return (dataframe['open'].rolling(length).max() - dataframe['close'].rolling(length).min()) / dataframe[
-            'close'].rolling(length).min()
-    else:
-        raise ValueError(f"Method {method} not defined!")
