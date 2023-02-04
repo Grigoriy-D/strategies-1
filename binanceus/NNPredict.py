@@ -46,6 +46,7 @@ from finta import TA as fta
 
 import keras
 import tensorflow as tf
+tf.config.set_visible_devices([], 'GPU')
 from keras import layers
 from tqdm import tqdm
 from tqdm.keras import TqdmCallback

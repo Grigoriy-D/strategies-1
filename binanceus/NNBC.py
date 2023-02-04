@@ -66,6 +66,7 @@ os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 os.environ['TF_DETERMINISTIC_OPS'] = '3'
 
 import tensorflow as tf
+tf.config.set_visible_devices([], 'GPU')
 
 seed = 42
 os.environ['PYTHONHASHSEED'] = str(seed)

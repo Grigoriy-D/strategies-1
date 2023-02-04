@@ -26,6 +26,7 @@ pd.options.mode.chained_assignment = None  # default='warn'
 # Strategy specific imports, files must reside in same folder as strategy
 
 import tensorflow as tf
+tf.config.set_visible_devices([], 'GPU')
 
 seed = 42
 os.environ['PYTHONHASHSEED'] = str(seed)

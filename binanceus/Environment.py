@@ -8,6 +8,7 @@ import platform
 
 try:
     import tensorflow as tf
+tf.config.set_visible_devices([], 'GPU')
     tf_installed = True
 except ModuleNotFoundError:
     tf_installed = False

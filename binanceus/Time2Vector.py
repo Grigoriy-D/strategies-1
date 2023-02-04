@@ -2,6 +2,7 @@ import numpy as np
 import pandas as pd
 import os, datetime
 import tensorflow as tf
+tf.config.set_visible_devices([], 'GPU')
 from keras.models import *
 from keras.layers import *
 
