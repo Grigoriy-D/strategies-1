@@ -20,7 +20,6 @@ import pathlib
 
 import numpy as np
 import tensorflow as tf
-tf.config.set_visible_devices([], 'GPU')
 from tensorflow.python.tools.inspect_checkpoint import print_tensors_in_checkpoint_file
 
 

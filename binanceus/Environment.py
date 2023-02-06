@@ -8,7 +8,6 @@ import platform
 
 try:
     import tensorflow as tf
-tf.config.set_visible_devices([], 'GPU')
     tf_installed = True
 except ModuleNotFoundError:
     tf_installed = False
@@ -67,7 +66,9 @@ def print_environment():
     # Tensorflow
     if tf_installed:
         tf_version = tf.__version__
-        tf_devices = tf.config.get_visible_devices()
+    # Set CPU as available physical device
+        my_devices = tf.config.experimental.list_physical_devices(device_type='CPU')
+        tf.config.experimental.set_visible_devices(devices= my_devices, device_type='CPU')
     else:
         tf_version = NOT_INSTALLED
 

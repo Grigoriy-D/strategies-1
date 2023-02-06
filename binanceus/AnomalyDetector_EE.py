@@ -28,7 +28,6 @@ os.environ['TF_CPP_MIN_LOG_LEVEL'] = '1'
 os.environ['TF_DETERMINISTIC_OPS'] = '1'
 
 import tensorflow as tf
-tf.config.set_visible_devices([], 'GPU')
 
 seed = 42
 os.environ['PYTHONHASHSEED'] = str(seed)
@@ -37,6 +36,10 @@ tf.random.set_seed(seed)
 np.random.seed(seed)
 
 tf.compat.v1.logging.set_verbosity(tf.compat.v1.logging.WARN)
+
+# Set CPU as available physical device
+my_devices = tf.config.experimental.list_physical_devices(device_type='CPU')
+tf.config.experimental.set_visible_devices(devices= my_devices, device_type='CPU')
 
 import keras
 from keras import layers

@@ -33,7 +33,6 @@ import tft_utils as utils
 import numpy as np
 import pandas as pd
 import tensorflow as tf
-tf.config.set_visible_devices([], 'GPU')
 
 # Layer definitions.
 concat = tf.keras.backend.concatenate
