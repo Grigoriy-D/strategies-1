@@ -98,7 +98,6 @@ from NNBClassifier_Transformer import NNBClassifier_Transformer
 from NNBClassifier_RBM import NNBClassifier_RBM
 
 import Environment
-import profiler
 
 """
 ####################################################################################

@@ -49,8 +49,8 @@ def print_environment():
 
     # OS info
     os_type = sys.platform
-    if os_type.lower() == "darwin":
-        os_type = os_type + " (MacOS)"
+    if os_type.lower() == "debian":
+        os_type = os_type + " (Ubuntu)"
     os_version = platform.platform()
     num_cpus = multiprocessing.cpu_count()
 
