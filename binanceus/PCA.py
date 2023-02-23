@@ -1305,8 +1305,8 @@ class PCA(IStrategy):
             
         if exit_long_conditions:
             dataframe.loc[
-                reduce(lambda x, y: x & y, enter_long_conditions), [
-                    "enter_long", "pca_long"]
+                reduce(lambda x, y: x & y, exit_long_conditions), [
+                    "exit_long", "pca_long"]
             ] = (1, "long")
 
         # add strategy-specific conditions (from subclass)
