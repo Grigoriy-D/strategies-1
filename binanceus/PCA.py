@@ -1310,13 +1310,13 @@ class PCA(IStrategy):
             ] = (1, "long")
 
         # add strategy-specific conditions (from subclass)
-        strat_sell_cond = self.get_strategy_sell_conditions(dataframe)
-        if strat_sell_cond is not None:
-            exit_long_conditions.append(strat_sell_cond)
+        strat_buy_cond = self.get_strategy_buy_conditions(dataframe)
+        if strat_buy_cond is not None:
+            exit_short_conditions.append(strat_buy_cond)
             
         exit_short_conditions = [
             dataframe['volume'] > 0,
-            qtpylib.crossed_above(dataframe['predict_sell'], 0.5),
+            qtpylib.crossed_above(dataframe['predict_buy'], 0.5),
         ]
 
         if exit_short_conditions:
