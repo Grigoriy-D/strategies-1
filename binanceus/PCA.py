@@ -1276,6 +1276,61 @@ class PCA(IStrategy):
     ###################################
 
     """
+    Exit Signal
+    """
+
+    def populate_exit_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
+
+        curr_pair = metadata['pair']
+        self.set_state(curr_pair, self.State.RUNNING)
+
+        if not self.dp.runmode.value in ('hyperopt'):
+            if PCA.first_run and self.dbg_scan_classifiers:
+                PCA.first_run = False  # note use of clas variable, not instance variable
+                # self.show_debug_info(curr_pair)
+                self.show_all_debug_info()
+        
+        exit_long_conditions = []
+        exit_short_conditions = []
+        
+        exit_long_conditions = [
+            dataframe['volume'] > 0,
+            qtpylib.crossed_above(dataframe['predict_sell'], 0.5)
+        ]
+
+        # add strategy-specific conditions (from subclass)
+        strat_long_cond = self.get_strategy_buy_conditions(dataframe)
+        if strat_long_cond is not None:
+            exit_long_conditions.append(strat_long_cond)
+            
+        if exit_long_conditions:
+            dataframe.loc[
+                reduce(lambda x, y: x & y, enter_long_conditions), [
+                    "enter_long", "pca_long"]
+            ] = (1, "long")
+
+        # add strategy-specific conditions (from subclass)
+        strat_sell_cond = self.get_strategy_sell_conditions(dataframe)
+        if strat_sell_cond is not None:
+            exit_long_conditions.append(strat_sell_cond)
+            
+        exit_short_conditions = [
+            dataframe['volume'] > 0,
+            qtpylib.crossed_above(dataframe['predict_sell'], 0.5),
+        ]
+
+        if exit_short_conditions:
+            dataframe.loc[
+                reduce(lambda x, y: x & y, exit_short_conditions), [
+                    "exit_short", "pca_short"]
+            ] = (1, "short")
+
+        return dataframe
+
+    ###################################
+
+
+    """
     Custom Stoploss
     """
 
