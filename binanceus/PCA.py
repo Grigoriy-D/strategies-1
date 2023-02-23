@@ -163,6 +163,7 @@ class PCA(IStrategy):
 
     # Stoploss:
     stoploss = -0.99
+    can_short = True
 
     # Trailing stop:
     trailing_stop = False
