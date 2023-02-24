@@ -3,6 +3,9 @@ import operator
 import numpy as np
 from enum import Enum
 
+from pyparsing import Any
+from binanceus.PCA_short import PCA_short
+
 import pywt
 import talib.abstract as ta
 from scipy.ndimage import gaussian_filter1d
@@ -119,7 +122,7 @@ class PCA3_short(IStrategy):
     timeframe = '5m'
 
     inf_timeframe = '5m'
-
+    can_short = True
     use_custom_stoploss = True
 
     # Recommended
@@ -130,6 +133,7 @@ class PCA3_short(IStrategy):
     # Required
     startup_candle_count: int = 128  # must be power of 2
     process_only_new_candles = True
+    can_short = True
 
     # Strategy-specific global vars
 
@@ -1857,52 +1861,55 @@ class PCA3_short(IStrategy):
 
     ###################################
 
-    """
-    Entry Signal
+     """
+    Buy Signal
     """
 
     def populate_entry_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
-        conditions = []
-        dataframe.loc[:, 'enter_tag'] = ''
-        curr_pair = metadata['pair']
 
+        curr_pair = metadata['pair']
         self.set_state(curr_pair, self.State.RUNNING)
 
-        # if not self.dp.runmode.value in ('hyperopt'):
-        #     if PCA3.first_run:
-        #         PCA3.first_run = False # note use of clas variable, not instance variable
-        #         # self.show_debug_info(curr_pair)
-        #         self.show_all_debug_info()
+        if not self.dp.runmode.value in ('hyperopt'):
+            if PCA.first_run and self.dbg_scan_classifiers:
+                PCA.first_run = False  # note use of clas variable, not instance variable
+                # self.show_debug_info(curr_pair)
+                self.show_all_debug_info()
+        
+        enter_long_conditions = []
+        enter_short_conditions = []
+        
+        enter_long_conditions = [
+            dataframe['volume'] > 0,
+            qtpylib.crossed_above(dataframe['predict_buy'], 0.5)
+        ]
 
-        conditions.append(dataframe['volume'] > 0)
+        # add strategy-specific conditions (from subclass)
+        strat_long_cond = self.get_strategy_buy_conditions(dataframe)
+        if strat_long_cond is not None:
+            enter_long_conditions.append(strat_long_cond)
+            
+        if enter_long_conditions:
+            dataframe.loc[
+                reduce(lambda x, y: x & y, enter_long_conditions), [
+                    "enter_long", "pca_long"]
+            ] = (1, "long")
 
-        # add some fairly loose guards, to help prevent 'bad' predictions
+        # add strategy-specific conditions (from subclass)
+        strat_sell_cond = self.get_strategy_sell_conditions(dataframe)
+        if strat_sell_cond is not None:
+            enter_short_conditions.append(strat_sell_cond)
+            
+        enter_short_conditions = [
+            dataframe['volume'] > 0,
+            qtpylib.crossed_above(dataframe['predict_sell'], 0.5),
+        ]
 
-        # # ATR in buy range
-        # conditions.append(dataframe['atr_signal'] > 0.0)
-
-        # some trading volume
-        conditions.append(dataframe['volume'] > 0)
-
-        # # Fisher RSI + Williams combo
-        # conditions.append(dataframe['fisher_wr'] < -0.7)
-
-        # below Bollinger mid-point
-        conditions.append(dataframe['close'] < dataframe['bb_middleband'])
-
-        # PCA/Classifier triggers
-        pca_cond = (
-            (qtpylib.crossed_above(dataframe['predict_buy'], 0.5))
-        )
-        conditions.append(pca_cond)
-
-        # set entry tags
-        dataframe.loc[pca_cond, 'enter_tag'] += 'pca_entry '
-
-        if conditions:
-            dataframe.loc[reduce(lambda x, y: x & y, conditions), 'buy'] = 1
-        else:
-            dataframe['buy'] = 0
+        if enter_short_conditions:
+            dataframe.loc[
+                reduce(lambda x, y: x & y, enter_short_conditions), [
+                    "enter_short", "pca_short"]
+            ] = (1, "short")
 
         return dataframe
 
@@ -1913,46 +1920,59 @@ class PCA3_short(IStrategy):
     """
 
     def populate_exit_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
-        conditions = []
-        dataframe.loc[:, 'exit_tag'] = ''
-        curr_pair = metadata['pair']
 
+        curr_pair = metadata['pair']
         self.set_state(curr_pair, self.State.RUNNING)
 
-        # if not self.dp.runmode.value in ('hyperopt'):
-        #     if PCA3.first_run:
-        #         PCA3.first_run = False # note use of clas variable, not instance variable
-        #         # self.show_debug_info(curr_pair)
-        #         self.show_all_debug_info()
-
-        conditions.append(dataframe['volume'] > 0)
-
-        # # ATR in sell range
-        # conditions.append(dataframe['atr_signal'] <= 0.0)
-
-        # above Bollinger mid-point
-        conditions.append(dataframe['close'] > dataframe['bb_middleband'])
-
-        # # Fisher RSI + Williams combo
-        # conditions.append(dataframe['fisher_wr'] > 0.5)
-
-        # PCA triggers
-        pca_cond = (
+        if not self.dp.runmode.value in ('hyperopt'):
+            if PCA.first_run and self.dbg_scan_classifiers:
+                PCA.first_run = False  # note use of clas variable, not instance variable
+                # self.show_debug_info(curr_pair)
+                self.show_all_debug_info()
+        
+        exit_long_conditions = []
+        exit_short_conditions = []
+        
+        exit_long_conditions = [
+            dataframe['volume'] > 0,
             qtpylib.crossed_above(dataframe['predict_sell'], 0.5)
-        )
+        ]
 
-        conditions.append(pca_cond)
+        # add strategy-specific conditions (from subclass)
+        strat_long_cond = self.get_strategy_buy_conditions(dataframe)
+        if strat_long_cond is not None:
+            exit_long_conditions.append(strat_long_cond)
+            
+        if exit_long_conditions:
+            dataframe.loc[
+                reduce(lambda x, y: x & y, exit_long_conditions), [
+                    "exit_long", "pca_long"]
+            ] = (1, "long")
 
-        dataframe.loc[pca_cond, 'exit_tag'] += 'pca_exit '
+        exit_short_conditions = [
+            dataframe['volume'] > 0,
+            qtpylib.crossed_above(dataframe['predict_buy'], 0.5),
+        ]
 
-        if conditions:
-            dataframe.loc[reduce(lambda x, y: x & y, conditions), 'sell'] = 1
-        else:
-            dataframe['sell'] = 0
+        # add strategy-specific conditions (from subclass)
+        strat_short_cond = self.get_strategy_sell_conditions(dataframe)
+        if strat_short_cond is not None:
+            exit_short_conditions.append(strat_short_cond)
+            
+        exit_short_conditions = [
+            dataframe['volume'] > 0,
+            qtpylib.crossed_above(dataframe['predict_buy'], 0.5),
+        ]
+
+        if exit_short_conditions:
+            dataframe.loc[
+                reduce(lambda x, y: x & y, exit_short_conditions), [
+                    "exit_short", "pca_short"]
+            ] = (1, "short")
 
         return dataframe
 
-        ###################################
+    ###################################
 
         """
         Custom Stoploss
