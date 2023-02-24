@@ -1955,9 +1955,9 @@ class PCA3_short(IStrategy):
         ]
 
         # add strategy-specific conditions (from subclass)
-        strat_short_cond = self.get_strategy_sell_conditions(dataframe)
-        if strat_short_cond is not None:
-            exit_short_conditions.append(strat_short_cond)
+        strat_sell_cond = self.get_strategy_sell_conditions(dataframe)
+        if strat_sell_cond is not None:
+            exit_short_conditions.append(strat_sell_cond)
             
         exit_short_conditions = [
             dataframe['volume'] > 0,
