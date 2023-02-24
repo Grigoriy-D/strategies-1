@@ -1258,7 +1258,7 @@ class PCA(IStrategy):
         # add strategy-specific conditions (from subclass)
         strat_sell_cond = self.get_strategy_sell_conditions(dataframe)
         if strat_sell_cond is not None:
-            enter_long_conditions.append(strat_sell_cond)
+            enter_short_conditions.append(strat_sell_cond)
             
         enter_short_conditions = [
             dataframe['volume'] > 0,
