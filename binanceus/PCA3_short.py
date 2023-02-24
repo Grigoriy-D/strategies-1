@@ -1959,10 +1959,6 @@ class PCA3_short(IStrategy):
         if strat_sell_cond is not None:
             exit_short_conditions.append(strat_sell_cond)
             
-        exit_short_conditions = [
-            dataframe['volume'] > 0,
-            qtpylib.crossed_above(dataframe['predict_buy'], 0.5),
-        ]
 
         if exit_short_conditions:
             dataframe.loc[
