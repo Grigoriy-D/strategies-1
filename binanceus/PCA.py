@@ -1222,7 +1222,7 @@ class PCA(IStrategy):
     ###################################
 
     """
-    Buy Signal
+    Entry Signal
     """
 
     def populate_entry_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
@@ -1241,6 +1241,8 @@ class PCA(IStrategy):
         
         enter_long_conditions = [
             dataframe['volume'] > 0,
+            dataframe['mfi'] < 30.0,
+            dataframe['close'] < dataframe['tema'],
             qtpylib.crossed_above(dataframe['predict_buy'], 0.5)
         ]
 
@@ -1262,6 +1264,8 @@ class PCA(IStrategy):
             
         enter_short_conditions = [
             dataframe['volume'] > 0,
+            dataframe['mfi'] > 70.0,
+            dataframe['close'] > dataframe['tema'],
             qtpylib.crossed_above(dataframe['predict_sell'], 0.5),
         ]
 
@@ -1295,6 +1299,8 @@ class PCA(IStrategy):
         
         exit_long_conditions = [
             dataframe['volume'] > 0,
+            dataframe['mfi'] > 70.0,
+            dataframe['close'] > dataframe['tema'],
             qtpylib.crossed_above(dataframe['predict_sell'], 0.5)
         ]
 
@@ -1316,6 +1322,8 @@ class PCA(IStrategy):
             
         exit_short_conditions = [
             dataframe['volume'] > 0,
+            dataframe['mfi'] < 30.0,
+            dataframe['close'] < dataframe['tema'],
             qtpylib.crossed_above(dataframe['predict_buy'], 0.5),
         ]
 
