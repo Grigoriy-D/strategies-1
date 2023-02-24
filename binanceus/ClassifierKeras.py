@@ -32,6 +32,9 @@ import os
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '1'
 os.environ['TF_DETERMINISTIC_OPS'] = '1'
 
+# workaround for memory leak in tensorflow 2.10
+os.environ['TF_RUN_EAGER_OP_AS_FUNCTION'] = '0'
+
 import tensorflow as tf
 
 seed = 42
@@ -459,9 +462,6 @@ class ClassifierKeras():
             try:
                 model = keras.models.load_model(path, compile=False)
                 self.compile_model(model)
-                # optimizer = keras.optimizers.Adam()
-                # optimizer = keras.optimizers.Adam(learning_rate=0.0001)
-                # model.compile(metrics=['mae', 'mse'], loss='mse', optimizer=optimizer)
                 self.is_trained = True
 
             except Exception as e:
