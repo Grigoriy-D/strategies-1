@@ -8,10 +8,10 @@
       "stoploss": -0.99
     },
     "trailing": {
-      "trailing_stop": false,
-      "trailing_stop_positive": null,
-      "trailing_stop_positive_offset": 0.0,
-      "trailing_only_offset_is_reached": false
+      "trailing_stop": true,
+      "trailing_stop_positive": 0.177,
+      "trailing_stop_positive_offset": 0.195,
+      "trailing_only_offset_is_reached": true
     },
     "max_open_trades": {
       "max_open_trades": 3
@@ -32,7 +32,7 @@
       "cstop_bail_time": 1320,
       "cstop_bail_time_trend": false,
       "cstop_loss_threshold": -0.048,
-      "cstop_max_stoploss": -0.296
+      "cstop_max_stoploss": -0.061
     },
     "protection": {}
   },

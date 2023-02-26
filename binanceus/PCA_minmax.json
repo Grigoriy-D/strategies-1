@@ -32,7 +32,7 @@
       "cstop_bail_time": 1040,
       "cstop_bail_time_trend": true,
       "cstop_loss_threshold": -0.012,
-      "cstop_max_stoploss": -0.238
+      "cstop_max_stoploss": -0.061
     },
     "protection": {}
   },
