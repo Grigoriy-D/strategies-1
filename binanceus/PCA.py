@@ -325,10 +325,11 @@ class PCA(IStrategy):
 
     def inf_pairs(self):
         # # all pairs in the whitelist are also in the informative list
-        # pairs = self.dp.current_whitelist()
-        # inf_pairs = [(pair, self.inf_timeframe) for pair in pairs]
-        # return inf_pairs
-        return []
+        pairs = self.dp.current_whitelist()
+        inf_pairs = [(pair, self.inf_timeframe) for pair in pairs]
+        return inf_pairs
+        
+        # return []
 
     ###################################
 
