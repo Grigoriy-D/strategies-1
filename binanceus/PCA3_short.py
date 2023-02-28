@@ -596,72 +596,72 @@ class PCA3_short(IStrategy):
 
         # # DWT model
         # # get rolling DWT. Probably OK to just apply to the whole dataframe, but be careful anyway
-        dataframe['dwt'] = dataframe['close'].rolling(window=self.dwt_window).apply(self.roll_get_dwt)
-        dataframe['smooth'] = dataframe['close'].rolling(window=self.dwt_window).apply(self.roll_smooth)
+        # dataframe['dwt'] = dataframe['close'].rolling(window=self.dwt_window).apply(self.roll_get_dwt)
+        # dataframe['smooth'] = dataframe['close'].rolling(window=self.dwt_window).apply(self.roll_smooth)
         # dataframe['dwt_smooth'] = dataframe['dwt'].rolling(window=self.dwt_window).apply(self.roll_smooth)
         #
         # # smoothed version - useful for trends
-        dataframe['dwt_smooth'] = gaussian_filter1d(dataframe['dwt'], 8)
+        # dataframe['dwt_smooth'] = gaussian_filter1d(dataframe['dwt'], 8)
         #
-        dataframe['dwt_deriv'] = np.gradient(dataframe['dwt_smooth'])
-        dataframe['dwt_top'] = np.where(qtpylib.crossed_below(dataframe['dwt_deriv'], 0.0), 1, 0)
-        dataframe['dwt_bottom'] = np.where(qtpylib.crossed_above(dataframe['dwt_deriv'], 0.0), 1, 0)
+        # dataframe['dwt_deriv'] = np.gradient(dataframe['dwt_smooth'])
+        # dataframe['dwt_top'] = np.where(qtpylib.crossed_below(dataframe['dwt_deriv'], 0.0), 1, 0)
+        # dataframe['dwt_bottom'] = np.where(qtpylib.crossed_above(dataframe['dwt_deriv'], 0.0), 1, 0)
         #
-        dataframe['dwt_diff'] = 100.0 * (dataframe['dwt'] - dataframe['close']) / dataframe['close']
-        dataframe['dwt_smooth_diff'] = 100.0 * (dataframe['dwt'] - dataframe['dwt_smooth']) / dataframe['dwt_smooth']
+        # dataframe['dwt_diff'] = 100.0 * (dataframe['dwt'] - dataframe['close']) / dataframe['close']
+        # dataframe['dwt_smooth_diff'] = 100.0 * (dataframe['dwt'] - dataframe['dwt_smooth']) / dataframe['dwt_smooth']
         #
         # # up/down direction
-        dataframe['dwt_dir'] = 0.0
-        dataframe['dwt_dir'] = np.where(dataframe['dwt'].diff() >= 0, 1.0, -1.0)
-        dataframe['dwt_dir'] = np.where(dataframe['dwt_smooth'].diff() >= 0, 1.0, -1.0)
+        # dataframe['dwt_dir'] = 0.0
+        # dataframe['dwt_dir'] = np.where(dataframe['dwt'].diff() >= 0, 1.0, -1.0)
+        # dataframe['dwt_dir'] = np.where(dataframe['dwt_smooth'].diff() >= 0, 1.0, -1.0)
         #
-        dataframe['dwt_trend'] = np.where(dataframe['dwt_dir'].rolling(5).sum() > 0.0, 1.0, -1.0)
+        # dataframe['dwt_trend'] = np.where(dataframe['dwt_dir'].rolling(5).sum() > 0.0, 1.0, -1.0)
         #
-        dataframe['dwt_gain'] = 100.0 * (dataframe['dwt'] - dataframe['dwt'].shift()) / dataframe['dwt'].shift()
+        # dataframe['dwt_gain'] = 100.0 * (dataframe['dwt'] - dataframe['dwt'].shift()) / dataframe['dwt'].shift()
         #
-        dataframe['dwt_profit'] = dataframe['dwt_gain'].clip(lower=0.0)
-        dataframe['dwt_loss'] = dataframe['dwt_gain'].clip(upper=0.0)
+        # dataframe['dwt_profit'] = dataframe['dwt_gain'].clip(lower=0.0)
+        # dataframe['dwt_loss'] = dataframe['dwt_gain'].clip(upper=0.0)
         #
         # # get rolling mean & stddev so that we have a localised estimate of (recent) activity
-        dataframe['dwt_mean'] = dataframe['dwt'].rolling(win_size).mean()
-        dataframe['dwt_std'] = dataframe['dwt'].rolling(win_size).std()
-        dataframe['dwt_profit_mean'] = dataframe['dwt_profit'].rolling(win_size).mean()
-        dataframe['dwt_profit_std'] = dataframe['dwt_profit'].rolling(win_size).std()
-        dataframe['dwt_loss_mean'] = dataframe['dwt_loss'].rolling(win_size).mean()
-        dataframe['dwt_loss_std'] = dataframe['dwt_loss'].rolling(win_size).std()
+        # dataframe['dwt_mean'] = dataframe['dwt'].rolling(win_size).mean()
+        # dataframe['dwt_std'] = dataframe['dwt'].rolling(win_size).std()
+        # dataframe['dwt_profit_mean'] = dataframe['dwt_profit'].rolling(win_size).mean()
+        # dataframe['dwt_profit_std'] = dataframe['dwt_profit'].rolling(win_size).std()
+        # dataframe['dwt_loss_mean'] = dataframe['dwt_loss'].rolling(win_size).mean()
+        # dataframe['dwt_loss_std'] = dataframe['dwt_loss'].rolling(win_size).std()
         #
         # # Sequences of consecutive up/downs
-        dataframe['dwt_nseq'] = dataframe['dwt_dir'].rolling(window=win_size, min_periods=1).sum()
+        # dataframe['dwt_nseq'] = dataframe['dwt_dir'].rolling(window=win_size, min_periods=1).sum()
         #
-        dataframe['dwt_nseq_up'] = dataframe['dwt_nseq'].clip(lower=0.0)
-        dataframe['dwt_nseq_up_mean'] = dataframe['dwt_nseq_up'].rolling(window=win_size).mean()
-        dataframe['dwt_nseq_up_std'] = dataframe['dwt_nseq_up'].rolling(window=win_size).std()
-        dataframe['dwt_nseq_up_thresh'] = dataframe['dwt_nseq_up_mean'] + \
+        # dataframe['dwt_nseq_up'] = dataframe['dwt_nseq'].clip(lower=0.0)
+        # dataframe['dwt_nseq_up_mean'] = dataframe['dwt_nseq_up'].rolling(window=win_size).mean()
+        # dataframe['dwt_nseq_up_std'] = dataframe['dwt_nseq_up'].rolling(window=win_size).std()
+        # dataframe['dwt_nseq_up_thresh'] = dataframe['dwt_nseq_up_mean'] + \
         #                                   self.n_profit_stddevs * dataframe['dwt_nseq_up_std']
-        dataframe['dwt_nseq_sell'] = np.where(dataframe['dwt_nseq_up'] > dataframe['dwt_nseq_up_thresh'], 1.0, 0.0)
+        # dataframe['dwt_nseq_sell'] = np.where(dataframe['dwt_nseq_up'] > dataframe['dwt_nseq_up_thresh'], 1.0, 0.0)
         #
-        dataframe['dwt_nseq_dn'] = dataframe['dwt_nseq'].clip(upper=0.0)
-        dataframe['dwt_nseq_dn_mean'] = dataframe['dwt_nseq_dn'].rolling(window=win_size).mean()
-        dataframe['dwt_nseq_dn_std'] = dataframe['dwt_nseq_dn'].rolling(window=win_size).std()
-        dataframe['dwt_nseq_dn_thresh'] = dataframe['dwt_nseq_dn_mean'] - self.n_loss_stddevs * dataframe[
-             'dwt_nseq_dn_std']
-        dataframe['dwt_nseq_buy'] = np.where(dataframe['dwt_nseq_dn'] < dataframe['dwt_nseq_dn_thresh'], 1.0, 0.0)
+        # dataframe['dwt_nseq_dn'] = dataframe['dwt_nseq'].clip(upper=0.0)
+        # dataframe['dwt_nseq_dn_mean'] = dataframe['dwt_nseq_dn'].rolling(window=win_size).mean()
+        # dataframe['dwt_nseq_dn_std'] = dataframe['dwt_nseq_dn'].rolling(window=win_size).std()
+        # dataframe['dwt_nseq_dn_thresh'] = dataframe['dwt_nseq_dn_mean'] - self.n_loss_stddevs * dataframe[
+        #      'dwt_nseq_dn_std']
+        # dataframe['dwt_nseq_buy'] = np.where(dataframe['dwt_nseq_dn'] < dataframe['dwt_nseq_dn_thresh'], 1.0, 0.0)
         #
         # # Recent min/max
-        dataframe['dwt_recent_min'] = dataframe['dwt_smooth'].rolling(window=win_size).min()
-        dataframe['dwt_recent_max'] = dataframe['dwt_smooth'].rolling(window=win_size).max()
-        dataframe['dwt_maxmin'] = 100.0 * (dataframe['dwt_recent_max'] - dataframe['dwt_recent_min']) / \
+        # dataframe['dwt_recent_min'] = dataframe['dwt_smooth'].rolling(window=win_size).min()
+        # dataframe['dwt_recent_max'] = dataframe['dwt_smooth'].rolling(window=win_size).max()
+        # dataframe['dwt_maxmin'] = 100.0 * (dataframe['dwt_recent_max'] - dataframe['dwt_recent_min']) / \
         #                           dataframe['dwt_recent_max']
         #
         # # longer term high/low
-        dataframe['dwt_low'] = dataframe['dwt_smooth'].rolling(window=self.startup_candle_count).min()
-        dataframe['dwt_high'] = dataframe['dwt_smooth'].rolling(window=self.startup_candle_count).max()
+        # dataframe['dwt_low'] = dataframe['dwt_smooth'].rolling(window=self.startup_candle_count).min()
+        # dataframe['dwt_high'] = dataframe['dwt_smooth'].rolling(window=self.startup_candle_count).max()
         #
         # # # these are (primarily) clues for the ML algorithm:
-        dataframe['dwt_at_min'] = np.where(dataframe['dwt_smooth'] <= dataframe['dwt_recent_min'], 1.0, 0.0)
-        dataframe['dwt_at_max'] = np.where(dataframe['dwt_smooth'] >= dataframe['dwt_recent_max'], 1.0, 0.0)
-        dataframe['dwt_at_low'] = np.where(dataframe['dwt_smooth'] <= dataframe['dwt_low'], 1.0, 0.0)
-        dataframe['dwt_at_high'] = np.where(dataframe['dwt_smooth'] >= dataframe['dwt_high'], 1.0, 0.0)
+        # dataframe['dwt_at_min'] = np.where(dataframe['dwt_smooth'] <= dataframe['dwt_recent_min'], 1.0, 0.0)
+        # dataframe['dwt_at_max'] = np.where(dataframe['dwt_smooth'] >= dataframe['dwt_recent_max'], 1.0, 0.0)
+        # dataframe['dwt_at_low'] = np.where(dataframe['dwt_smooth'] <= dataframe['dwt_low'], 1.0, 0.0)
+        # dataframe['dwt_at_high'] = np.where(dataframe['dwt_smooth'] >= dataframe['dwt_high'], 1.0, 0.0)
 
         # TODO: remove/fix any columns that contain 'inf'
         self.check_inf(dataframe)
